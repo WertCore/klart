@@ -6,9 +6,9 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 1. Scaffold the workspace
 
-- [ ] Cargo workspace, pinned toolchain, `rustfmt` settings, dual licence
-- [ ] CI on macOS: format, clippy at `-D warnings`, tests, docs at `-D warnings`
-- [ ] `Brightness`, the fraction every backend converts to and from
+- [x] Cargo workspace, pinned toolchain, `rustfmt` settings, dual licence
+- [x] CI on macOS: format, clippy at `-D warnings`, tests, docs at `-D warnings`
+- [x] `Brightness`, the fraction every backend converts to and from
 
 ## 2. Find the displays
 
