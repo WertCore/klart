@@ -7,3 +7,26 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+
+# Both are cut down to the headers actually used. `objc2-io-kit` is deliberately
+# absent: it binds IOKit's USB, HID and power families but none of IOKitLib's
+# service and registry calls, which are what display discovery needs, so those
+# are declared in `sys::ioreg` instead.
+[dependencies]
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFBase",
+    "CFCGTypes",
+    "CFDictionary",
+    "CFNumber",
+    "CFString",
+] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CGDirectDisplay",
+    "CGDisplayConfiguration",
+    "CGError",
+    # `CGDisplayIsBuiltin` and `CGDisplayIsMain` return `libc::boolean_t`, so the
+    # binding for them only exists with this on.
+    "libc",
+] }

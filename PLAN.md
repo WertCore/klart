@@ -12,10 +12,10 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 2. Find the displays
 
-- [ ] Enumerate active displays through `CGGetActiveDisplayList`
-- [ ] Per display: vendor, model, serial, built-in flag, bounds, main flag
-- [ ] Readable names out of the IORegistry, since Core Graphics has none
-- [ ] A stable key per display, so configuration survives a reconnect and a
+- [x] Enumerate active displays through `CGGetActiveDisplayList`
+- [x] Per display: vendor, model, serial, built-in flag, bounds, main flag
+- [x] Readable names out of the IORegistry, since Core Graphics has none
+- [x] A stable key per display, so configuration survives a reconnect and a
       `CGDirectDisplayID` that is not stable across one
 
 ## 3. The built-in panel

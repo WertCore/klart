@@ -5,10 +5,12 @@
 //! neither are three unrelated mechanisms, and this crate's job is to hide that
 //! behind one vocabulary. [`Brightness`] is the unit that vocabulary is written
 //! in: every backend converts to and from it at its own edge.
+//!
+//! Start at [`displays`], which is the only way to obtain a [`Display`].
 
 #![deny(missing_docs)]
 
-// The two mechanisms this crate is built on — the `DisplayServices` framework and
+// The mechanisms this crate is built on — the `DisplayServices` framework and
 // IOKit's `IOAVService` — are macOS-only and have no equivalent elsewhere, so a
 // build for another target would be a silent no-op rather than a port.
 #[cfg(not(target_os = "macos"))]
@@ -17,5 +19,10 @@ compile_error!(
 );
 
 mod brightness;
+mod display;
+mod error;
+mod sys;
 
 pub use brightness::Brightness;
+pub use display::{Bounds, Display, DisplayKey, DisplayKind, displays};
+pub use error::{Error, Result};
