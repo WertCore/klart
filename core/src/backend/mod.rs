@@ -8,8 +8,10 @@ use crate::Brightness;
 use crate::error::Result;
 
 mod built_in;
+mod ddc;
 
 pub use built_in::BuiltIn;
+pub use ddc::Ddc;
 
 /// One way of reaching one display's brightness.
 pub trait Backend {

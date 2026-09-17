@@ -27,12 +27,26 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 4. External monitors over DDC/CI
 
-- [ ] `IOAVService` bound the same way
-- [ ] Match each `CGDirectDisplayID` to its IORegistry node — the two namespaces
+- [x] `IOAVService` bound the same way
+- [x] Match each `CGDirectDisplayID` to its IORegistry node — the two namespaces
       have no common identifier, so this goes through the product attributes
 - [ ] VCP `0x10` get and set, with the checksums, the reply validation and the
       inter-message delays that DDC needs to be reliable
 - [ ] Report the monitor's own maximum rather than assuming one
+
+The last two stay unticked. The framing and the reply validation are written and
+unit tested against hand-computed frames, but no monitor here has answered one.
+
+The only external display available is attached by a USB-C cable that terminates
+in HDMI, so the link converts DisplayPort to HDMI inside the cable. On that path
+the Mac's display coprocessor refuses every DDC write with `0xe0114102` — a
+DCPAV-family rejection rather than a generic "unsupported" — while a read on the
+same channel succeeds. Five framings were tried (chip `0x37` and `0x6e`, offsets
+`0x51`, `0x00` and `0x6e`, with and without the host address in the buffer) and
+all five failed identically, which is what rules the encoding out as the cause.
+
+Verifying these needs a display on DisplayPort or USB-C alt mode without an HDMI
+conversion in the path.
 
 ## 5. The gamma fallback, and choosing between the three
 
