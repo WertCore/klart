@@ -2,7 +2,8 @@
 
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayModelNumber,
-    CGDisplaySerialNumber, CGDisplayVendorNumber, CGError, CGGetActiveDisplayList,
+    CGDisplayRestoreColorSyncSettings, CGDisplaySerialNumber, CGDisplayVendorNumber, CGError,
+    CGGetActiveDisplayList, CGGetDisplayTransferByFormula, CGSetDisplayTransferByFormula,
 };
 
 use crate::display::Bounds;
@@ -71,4 +72,80 @@ fn describe(id: CGDirectDisplayID) -> CgDisplay {
             height: frame.size.height.round().max(0.0) as u32,
         },
     }
+}
+
+/// A display's gamma formula, as one channel of it.
+///
+/// This crate only ever writes ramps with all three channels equal, so one set
+/// of numbers describes everything it does. A ramp written by something else —
+/// a colour profile, Night Shift — may not be uniform, and is summarised here by
+/// its brightest channel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Ramp {
+    pub min: f32,
+    pub max: f32,
+    pub gamma: f32,
+}
+
+/// The identity ramp: everything through, nothing scaled.
+pub(crate) const IDENTITY: Ramp = Ramp {
+    min: 0.0,
+    max: 1.0,
+    gamma: 1.0,
+};
+
+/// Reads a display's gamma formula.
+pub(crate) fn transfer_formula(id: CGDirectDisplayID) -> Result<Ramp> {
+    let mut channels = [0.0_f32; 9];
+
+    // SAFETY: nine live `f32`s, which is what the nine out pointers require.
+    let status = unsafe {
+        CGGetDisplayTransferByFormula(
+            id,
+            &raw mut channels[0],
+            &raw mut channels[1],
+            &raw mut channels[2],
+            &raw mut channels[3],
+            &raw mut channels[4],
+            &raw mut channels[5],
+            &raw mut channels[6],
+            &raw mut channels[7],
+            &raw mut channels[8],
+        )
+    };
+    if status != CGError::Success {
+        return Err(Error::CoreGraphics {
+            call: "CGGetDisplayTransferByFormula",
+            code: status.0,
+        });
+    }
+
+    Ok(Ramp {
+        min: channels[0],
+        max: channels[1].max(channels[4]).max(channels[7]),
+        gamma: channels[2],
+    })
+}
+
+/// Writes a display's gamma formula, the same on all three channels.
+pub(crate) fn set_transfer_formula(id: CGDirectDisplayID, ramp: Ramp) -> Result<()> {
+    let Ramp { min, max, gamma } = ramp;
+
+    let status =
+        CGSetDisplayTransferByFormula(id, min, max, gamma, min, max, gamma, min, max, gamma);
+    if status != CGError::Success {
+        return Err(Error::CoreGraphics {
+            call: "CGSetDisplayTransferByFormula",
+            code: status.0,
+        });
+    }
+    Ok(())
+}
+
+/// Puts every display's ramp back to what ColorSync says it should be.
+///
+/// Undoes this crate's dimming on every display at once, which is why it takes
+/// no display: it is the panic button, not an ordinary operation.
+pub(crate) fn restore_colour_sync() {
+    CGDisplayRestoreColorSyncSettings();
 }
