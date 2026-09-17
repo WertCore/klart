@@ -50,10 +50,23 @@ conversion in the path.
 
 ## 5. The gamma fallback, and choosing between the three
 
-- [ ] Software dimming through `CGSetDisplayTransferByFormula`
-- [ ] Restore the ramp on exit, including on a signal — a process that dies
-      holding a dark ramp leaves the display dark until the user logs out
-- [ ] Per-display backend resolution: built-in, else DDC, else gamma
+- [x] Software dimming through `CGSetDisplayTransferByFormula`, floored so that
+      the dimmest setting is still a screen this can be undone from
+- [x] Establish what a ramp's lifetime actually is
+- [x] Per-display resolution: built-in, else DDC/CI, else gamma
+
+The second box replaces "restore the ramp on exit, including on a signal — a
+process that dies holding a dark ramp leaves the display dark until the user logs
+out". That premise is wrong. macOS reverts a display's ramp when the process that
+set it exits, on a clean exit and on `SIGKILL` alike: both read back at 100% from
+a fresh process, while a second process reads 50% for as long as the setter is
+alive. So there is no signal handler, and `restore_everything` is a panic button
+rather than a shutdown path.
+
+The consequence lands on entries 6 and 7 instead. Gamma dimming holds only while
+something holds it, so a command that dims a gamma-backed display and exits has
+done nothing at all. The menu bar agent is resident and can hold it. The command
+line cannot, and has to say so rather than appear to work.
 
 ## 6. The command line
 

@@ -20,11 +20,13 @@ compile_error!(
 
 mod backend;
 mod brightness;
+mod control;
 mod display;
 mod error;
 mod sys;
 
-pub use backend::{Backend, BuiltIn, Ddc};
+pub use backend::{Backend, BuiltIn, Ddc, Gamma};
 pub use brightness::Brightness;
+pub use control::{Control, controls};
 pub use display::{Bounds, Display, DisplayKey, DisplayKind, displays};
 pub use error::{Error, Result};

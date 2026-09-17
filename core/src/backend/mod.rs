@@ -9,14 +9,25 @@ use crate::error::Result;
 
 mod built_in;
 mod ddc;
+mod gamma;
 
 pub use built_in::BuiltIn;
 pub use ddc::Ddc;
+pub use gamma::Gamma;
 
 /// One way of reaching one display's brightness.
 pub trait Backend {
     /// The mechanism's name, for diagnostics and for machine-readable output.
     fn name(&self) -> &'static str;
+
+    /// Whether a change made through this mechanism outlives the process.
+    ///
+    /// True for anything that moves a backlight, because the setting lives in
+    /// the display. False for the gamma ramp, which macOS reverts the moment the
+    /// process that set it exits.
+    fn persists(&self) -> bool {
+        true
+    }
 
     /// Reads the display's current level.
     ///

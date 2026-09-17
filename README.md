@@ -14,7 +14,7 @@ There is no single brightness API on macOS, so there is no single backend here.
 | --- | --- | --- |
 | Built-in panel | `DisplayServices` private framework | The only path that works on Apple silicon. IOKit's `IODisplaySetFloatParameter` is documented for this and does nothing on these machines. |
 | External, speaks DDC/CI | `IOAVServiceReadI2C` / `IOAVServiceWriteI2C`, VCP feature `0x10` | Real backlight control, at the pace the monitor's I2C link will take it. |
-| Everything else | `CGSetDisplayTransferByFormula` | A gamma ramp. It darkens the picture rather than the backlight, so contrast suffers — a fallback for displays behind docks and DisplayLink adapters, not a peer of the other two. |
+| Everything else | `CGSetDisplayTransferByFormula` | A gamma ramp. It darkens the picture rather than the backlight, so contrast suffers, and macOS reverts it the moment the process that set it exits — so it holds only while `klart` is running. A fallback for displays behind adaptors that do not carry DDC, not a peer of the other two. |
 
 Both hardware paths are private, undocumented Apple interfaces. There is no
 supported alternative that reaches an external monitor's backlight, and this is
