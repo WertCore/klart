@@ -1,0 +1,20 @@
+[package]
+name = "klart-cli"
+description = "Command line interface to klart"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "klart"
+path = "src/main.rs"
+
+[dependencies]
+klart-core.workspace = true
+clap = { version = "4", features = ["derive"] }
+# Display names come from the monitor's own EDID and are not this program's to
+# trust with quoting, so `--json` is built by a serialiser rather than by hand.
+serde_json = "1"

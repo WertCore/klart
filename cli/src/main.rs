@@ -1,0 +1,211 @@
+//! `klart` on the command line.
+
+mod render;
+mod select;
+
+use std::process::ExitCode;
+
+use clap::{Args, Parser, Subcommand};
+use klart_core::{Brightness, Control, controls};
+
+use crate::select::{Candidate, Selection};
+
+/// The step `up` and `down` take when not told otherwise.
+const DEFAULT_STEP: f32 = 10.0;
+
+#[derive(Parser)]
+#[command(
+    name = "klart",
+    version,
+    about = "Brightness for every display attached to a Mac",
+    long_about = "Brightness for every display attached to a Mac.\n\n\
+        Commands act on the display holding the menu bar unless told otherwise. \
+        `--display` takes an index, a key or part of a name, all as printed by \
+        `klart list`."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Show every attached display, its level and how klart reaches it.
+    List {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Print a display's level.
+    Get {
+        #[command(flatten)]
+        target: Target,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Set a display's level, as a percentage.
+    Set {
+        /// A percentage, with or without the sign: `40` and `40%` are the same.
+        percent: Percent,
+        #[command(flatten)]
+        target: Target,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Make a display brighter.
+    Up {
+        /// How far, in percentage points.
+        #[arg(default_value_t = DEFAULT_STEP)]
+        step: f32,
+        #[command(flatten)]
+        target: Target,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Make a display dimmer.
+    Down {
+        /// How far, in percentage points.
+        #[arg(default_value_t = DEFAULT_STEP)]
+        step: f32,
+        #[command(flatten)]
+        target: Target,
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Args)]
+struct Target {
+    /// Which display: an index, a key, or part of a name.
+    #[arg(short, long, value_name = "INDEX|KEY|NAME")]
+    display: Option<String>,
+
+    /// Every attached display.
+    #[arg(short, long, conflicts_with = "display")]
+    all: bool,
+}
+
+impl Target {
+    fn selection(&self) -> Selection {
+        match (&self.display, self.all) {
+            (Some(wanted), _) => Selection::Named(wanted.clone()),
+            (None, true) => Selection::All,
+            (None, false) => Selection::Main,
+        }
+    }
+}
+
+#[derive(Args)]
+struct Output {
+    /// Print machine-readable output instead of a table.
+    #[arg(long)]
+    json: bool,
+}
+
+/// A percentage, accepted with or without a trailing sign.
+#[derive(Clone, Copy)]
+struct Percent(f32);
+
+impl std::str::FromStr for Percent {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let trimmed = raw.trim().trim_end_matches('%').trim();
+        let value: f32 = trimmed
+            .parse()
+            .map_err(|_| format!("{raw:?} is not a number"))?;
+
+        if !(0.0..=100.0).contains(&value) {
+            return Err(format!("{value} is outside 0 to 100"));
+        }
+        Ok(Self(value))
+    }
+}
+
+fn main() -> ExitCode {
+    match run(&Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(problem) => {
+            eprintln!("klart: {problem}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let found = controls()?;
+
+    // `list` on a machine with nothing attached is an answer, not a failure —
+    // the same way an empty directory is not an error for `ls`. Every other
+    // command genuinely has nothing to act on.
+    if found.is_empty()
+        && let Command::List { output } = &cli.command
+    {
+        if output.json {
+            println!("[]");
+        } else {
+            println!("no displays are attached");
+        }
+        return Ok(());
+    }
+
+    let (target, output) = match &cli.command {
+        Command::List { output } => (
+            &Target {
+                display: None,
+                all: true,
+            },
+            output,
+        ),
+        Command::Get { target, output }
+        | Command::Set { target, output, .. }
+        | Command::Up { target, output, .. }
+        | Command::Down { target, output, .. } => (target, output),
+    };
+
+    let chosen = select::resolve(&candidates(&found), &target.selection())?;
+
+    for &index in &chosen {
+        let control = &found[index];
+        match &cli.command {
+            Command::List { .. } | Command::Get { .. } => {}
+            Command::Set { percent, .. } => {
+                control.set(Brightness::from_percent(percent.0))?;
+            }
+            Command::Up { step, .. } => {
+                control.adjust(step / 100.0)?;
+            }
+            Command::Down { step, .. } => {
+                control.adjust(-step / 100.0)?;
+            }
+        }
+    }
+
+    let changed = !matches!(cli.command, Command::List { .. } | Command::Get { .. });
+    let reported: Vec<&Control> = chosen.iter().map(|&index| &found[index]).collect();
+
+    if output.json {
+        render::json(&reported, &chosen);
+    } else {
+        render::table(
+            &reported,
+            &chosen,
+            matches!(cli.command, Command::List { .. }),
+        );
+    }
+
+    if changed {
+        render::warn_about_anything_that_will_not_last(&reported);
+    }
+    Ok(())
+}
+
+fn candidates(found: &[Control]) -> Vec<Candidate> {
+    found
+        .iter()
+        .map(|control| Candidate {
+            name: control.display().name().to_owned(),
+            key: control.display().key().to_string(),
+            is_main: control.display().is_main(),
+        })
+        .collect()
+}

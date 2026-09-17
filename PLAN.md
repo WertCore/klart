@@ -70,9 +70,10 @@ line cannot, and has to say so rather than appear to work.
 
 ## 6. The command line
 
-- [ ] `list`, `get`, `set`, `up`, `down`
-- [ ] `--display` by index, name or key; `--all`
-- [ ] `--json`, so it composes with something else
+- [x] `list`, `get`, `set`, `up`, `down`
+- [x] `--display` by index, name or key; `--all`
+- [x] `--json`, so it composes with something else
+- [x] Say so when a change will not outlive the command, per entry 5
 
 ## 7. The menu bar
 
