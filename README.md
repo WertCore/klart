@@ -21,6 +21,28 @@ supported alternative that reaches an external monitor's backlight, and this is
 what every tool in this space uses, but it is worth knowing before depending on
 it: a macOS release can take either away.
 
+## Using it
+
+```
+$ klart list
+IDX  LEVEL  MECHANISM        DISPLAY                  KEY
+  0    44%  DisplayServices  Built-in Display (main)  builtin
+  1   100%  gamma*           LS32AG55x                SAM-71e3-HNAW900001
+       DisplayServices cannot reach display SAM-71e3-HNAW900001
+       DDC/CI cannot reach display SAM-71e3-HNAW900001
+
+$ klart set 60
+$ klart down 10 --display LS32
+$ klart up --all
+$ klart get --json
+```
+
+Commands act on the display holding the menu bar unless told otherwise.
+`--display` takes an index, a key, or part of a name.
+
+A `*` on the mechanism means the change does not outlive the command — see the
+gamma row of the table above.
+
 ## Status
 
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per

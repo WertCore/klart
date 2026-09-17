@@ -1,0 +1,160 @@
+//! Turning displays into something to read, or something to pipe.
+
+use klart_core::{Control, DisplayKind};
+use serde_json::{Value, json};
+
+/// The table `list`, `get`, `set`, `up` and `down` print.
+///
+/// `verbose` adds the columns only `list` has room to justify — the key, which
+/// is long, and the reasons the better mechanisms declined.
+pub fn table(controls: &[&Control], indices: &[usize], verbose: bool) {
+    let rows: Vec<Row> = controls
+        .iter()
+        .zip(indices)
+        .map(|(control, &index)| Row::of(control, index))
+        .collect();
+
+    if rows.is_empty() {
+        return;
+    }
+
+    let name_width = rows.iter().map(|row| row.name.len()).max().unwrap_or(0);
+    let mechanism_width = rows
+        .iter()
+        .map(|row| row.mechanism.len())
+        .max()
+        .unwrap_or(0);
+
+    if verbose {
+        // Only `list` gets a header. `get` is the one people pipe into other
+        // things, and a header there would be a line to strip.
+        println!(
+            "{index:>3}  {level:>5}  {mechanism:<mechanism_width$}  {name:<name_width$}  KEY",
+            index = "IDX",
+            level = "LEVEL",
+            mechanism = "MECHANISM",
+            name = "DISPLAY",
+        );
+    }
+
+    for row in &rows {
+        println!(
+            "{index:>3}  {level:>5}  {mechanism:<mechanism_width$}  {name:<name_width$}{key}",
+            index = row.index,
+            level = row.level,
+            mechanism = row.mechanism,
+            name = row.name,
+            key = if verbose {
+                format!("  {}", row.key)
+            } else {
+                String::new()
+            },
+        );
+
+        if verbose {
+            for refusal in &row.refusals {
+                println!("       {refusal}");
+            }
+        }
+    }
+}
+
+/// Says plainly when a change has already been undone.
+///
+/// macOS reverts a gamma ramp when the process that set it exits, so a `set` on
+/// a display with no hardware mechanism has done nothing by the time this
+/// process returns. Printing the new level and stopping there would be a lie.
+pub fn warn_about_anything_that_will_not_last(controls: &[&Control]) {
+    for control in controls {
+        if !control.persists() {
+            eprintln!(
+                "klart: {} has no hardware brightness control, so it was dimmed with its gamma \
+                 ramp — and macOS puts that back as this command exits. The change is already \
+                 gone. Only a process that keeps running can hold it.",
+                control.display().name()
+            );
+        }
+    }
+}
+
+/// The same displays, for something other than a person.
+pub fn json(controls: &[&Control], indices: &[usize]) {
+    let displays: Vec<Value> = controls
+        .iter()
+        .zip(indices)
+        .map(|(control, &index)| {
+            let display = control.display();
+            let bounds = display.bounds();
+
+            json!({
+                "index": index,
+                "id": display.id(),
+                "name": display.name(),
+                "key": display.key().as_str(),
+                "kind": match display.kind() {
+                    DisplayKind::BuiltIn => "built-in",
+                    DisplayKind::External => "external",
+                },
+                "main": display.is_main(),
+                "bounds": {
+                    "x": bounds.x,
+                    "y": bounds.y,
+                    "width": bounds.width,
+                    "height": bounds.height,
+                },
+                "percent": control.get().ok().map(|level| level.percent_rounded()),
+                "mechanism": control.mechanism(),
+                "persists": control.persists(),
+                "refusals": control
+                    .refusals()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&displays).unwrap_or_else(|_| "[]".to_owned())
+    );
+}
+
+struct Row {
+    index: usize,
+    level: String,
+    mechanism: String,
+    name: String,
+    key: String,
+    refusals: Vec<String>,
+}
+
+impl Row {
+    fn of(control: &Control, index: usize) -> Self {
+        Self {
+            index,
+            level: match control.get() {
+                Ok(level) => level.to_string(),
+                // A display that will not answer still belongs in the list; the
+                // reason it did not is on the line below when `list` asked.
+                Err(_) => "?".to_owned(),
+            },
+            mechanism: if control.persists() {
+                control.mechanism().to_owned()
+            } else {
+                format!("{}*", control.mechanism())
+            },
+            name: format!(
+                "{}{}",
+                control.display().name(),
+                if control.display().is_main() {
+                    " (main)"
+                } else {
+                    ""
+                }
+            ),
+            key: control.display().key().to_string(),
+            refusals: control.refusals().iter().map(ToString::to_string).collect(),
+        }
+    }
+}
