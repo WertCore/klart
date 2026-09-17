@@ -1,0 +1,12 @@
+/target
+
+# The `.app` bundle the packaging script assembles.
+/dist
+
+**/*.rs.bk
+*.pdb
+
+.DS_Store
+
+# Written by the code-review-graph MCP server.
+/.code-review-graph
