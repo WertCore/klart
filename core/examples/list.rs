@@ -2,7 +2,7 @@
 //! display discovery and brightness control that a test on a headless runner
 //! cannot reach.
 
-use klart_core::{Backend, BuiltIn};
+use klart_core::{Backend, BuiltIn, Ddc};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let displays = klart_core::displays()?;
@@ -26,12 +26,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             y = bounds.y,
         );
 
-        match BuiltIn::open(&display) {
-            Ok(panel) => match panel.get() {
-                Ok(level) => println!("  level   {level} via {}", panel.name()),
+        let mechanism: Option<Box<dyn Backend>> = BuiltIn::open(&display)
+            .map(|panel| Box::new(panel) as Box<dyn Backend>)
+            .or_else(|panel_refusal| {
+                println!("  ...     {panel_refusal}");
+                Ddc::open(&display).map(|ddc| Box::new(ddc) as Box<dyn Backend>)
+            })
+            .ok();
+
+        match mechanism {
+            Some(found) => match found.get() {
+                Ok(level) => println!("  level   {level} via {}", found.name()),
                 Err(failure) => println!("  level   unreadable: {failure}"),
             },
-            Err(refusal) => println!("  level   {refusal}"),
+            None => println!("  level   no mechanism reaches this display"),
         }
         println!();
     }

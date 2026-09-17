@@ -38,6 +38,19 @@ pub enum Error {
         /// The display it declined, by key.
         display: String,
     },
+    /// The display was asked and did not answer.
+    ///
+    /// Distinct from [`Error::MechanismFailed`]: nothing went wrong locally. A
+    /// DDC/CI bus has no flow control, so a monitor that is asleep, switching
+    /// input or simply busy is indistinguishable from one that is not there.
+    NoReply {
+        /// The mechanism that got no answer.
+        mechanism: &'static str,
+        /// The display that did not answer, by key.
+        display: String,
+        /// How many times it was asked.
+        attempts: usize,
+    },
     /// The mechanism accepted the display and then failed the call.
     MechanismFailed {
         /// The mechanism that failed.
@@ -61,6 +74,14 @@ impl fmt::Display for Error {
             Self::CannotReach { mechanism, display } => {
                 write!(f, "{mechanism} cannot reach display {display}")
             }
+            Self::NoReply {
+                mechanism,
+                display,
+                attempts,
+            } => write!(
+                f,
+                "{display} did not answer {mechanism} in {attempts} attempts"
+            ),
             Self::MechanismFailed {
                 mechanism,
                 call,

@@ -4,7 +4,7 @@ use std::fmt;
 
 use crate::error::Result;
 use crate::sys::graphics::{self, CgDisplay};
-use crate::sys::ioreg::{self, ProductAttributes};
+use crate::sys::ioreg::{self, DisplayNode, ProductAttributes};
 
 /// Whether a display is the machine's own panel or something plugged into it.
 ///
@@ -63,6 +63,19 @@ pub struct Display {
     kind: DisplayKind,
     is_main: bool,
     bounds: Bounds,
+    edid: Edid,
+}
+
+/// The EDID numbers that join a display to its registry node.
+///
+/// Carried on every [`Display`] so that a backend opening later can find the
+/// same node without being handed one, which would tie the display's lifetime to
+/// a registry object it has no reason to own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Edid {
+    pub vendor: u32,
+    pub model: u32,
+    pub serial: u32,
 }
 
 impl Display {
@@ -104,6 +117,11 @@ impl Display {
     pub fn bounds(&self) -> Bounds {
         self.bounds
     }
+
+    /// The numbers that find this display's registry node again.
+    pub(crate) fn edid(&self) -> Edid {
+        self.edid
+    }
 }
 
 /// Every display that is on and drawing, in the order Core Graphics returns.
@@ -118,7 +136,7 @@ impl Display {
 /// cannot be found is still returned, under a generated one.
 pub fn displays() -> Result<Vec<Display>> {
     let attached = graphics::active_displays()?;
-    let published = ioreg::product_attributes();
+    let published = ioreg::display_nodes();
 
     let described: Vec<(&CgDisplay, Option<&ProductAttributes>)> = attached
         .iter()
@@ -147,35 +165,22 @@ pub fn displays() -> Result<Vec<Display>> {
             },
             is_main: display.is_main,
             bounds: display.bounds,
+            edid: Edid {
+                vendor: display.vendor,
+                model: display.model,
+                serial: display.serial,
+            },
         })
         .collect())
 }
 
-/// Finds the registry node that belongs to a Core Graphics display.
-///
-/// The two namespaces share no identifier, so the join is on the EDID numbers
-/// both of them carry.
+/// The attributes of the registry node this display belongs to.
 fn attributes_for<'a>(
     display: &CgDisplay,
-    published: &'a [ProductAttributes],
+    published: &'a [DisplayNode],
 ) -> Option<&'a ProductAttributes> {
-    published.iter().find(|candidate| {
-        candidate.legacy_manufacturer_id == Some(u64::from(display.vendor))
-            && candidate.product_id == Some(u64::from(display.model))
-            && serial_agrees(candidate, display)
-    })
-}
-
-/// Whether a candidate's serial number rules it out.
-///
-/// A node that publishes no serial is not evidence against a match — the
-/// built-in panel publishes none at all, and neither do plenty of monitors — so
-/// only a serial that is present and different disqualifies.
-fn serial_agrees(candidate: &ProductAttributes, display: &CgDisplay) -> bool {
-    match candidate.serial_number {
-        Some(serial) => serial == u64::from(display.serial),
-        None => true,
-    }
+    ioreg::node_for(published, display.vendor, display.model, display.serial)
+        .map(|node| &node.attributes)
 }
 
 /// The name to show for a display.
@@ -363,22 +368,6 @@ mod tests {
     #[test]
     fn a_nameless_external_with_no_usable_code_is_named_after_its_id() {
         assert_eq!(name_for(&external(0, 1, 1, 0), None), "Display 1");
-    }
-
-    #[test]
-    fn a_serial_that_is_present_and_different_rules_a_candidate_out() {
-        let candidate = ProductAttributes {
-            serial_number: Some(999),
-            ..ProductAttributes::default()
-        };
-        assert!(!serial_agrees(&candidate, &external(0x4c2d, 1, 1, 0)));
-    }
-
-    #[test]
-    fn a_candidate_that_publishes_no_serial_is_still_a_candidate() {
-        // The built-in panel publishes none, and neither do many monitors.
-        let candidate = ProductAttributes::default();
-        assert!(serial_agrees(&candidate, &external(0x4c2d, 1, 1, 0)));
     }
 
     #[test]

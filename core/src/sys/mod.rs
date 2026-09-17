@@ -4,6 +4,7 @@
 //! IORegistry owns their names. Neither knows about the other, so [`graphics`]
 //! and [`ioreg`] are read separately and joined in [`crate::display`].
 
+pub(crate) mod av_service;
 pub(crate) mod display_services;
 pub(crate) mod graphics;
 pub(crate) mod ioreg;

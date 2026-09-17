@@ -24,7 +24,7 @@ mod display;
 mod error;
 mod sys;
 
-pub use backend::{Backend, BuiltIn};
+pub use backend::{Backend, BuiltIn, Ddc};
 pub use brightness::Brightness;
 pub use display::{Bounds, Display, DisplayKey, DisplayKind, displays};
 pub use error::{Error, Result};
