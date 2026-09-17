@@ -1,5 +1,8 @@
 //! Prints what `klart` can see, which is the only way to check the parts of
-//! display discovery that a test on a headless runner cannot reach.
+//! display discovery and brightness control that a test on a headless runner
+//! cannot reach.
+
+use klart_core::{Backend, BuiltIn};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let displays = klart_core::displays()?;
@@ -11,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for display in displays {
         let bounds = display.bounds();
         println!(
-            "{name}\n  id      {id}\n  key     {key}\n  kind    {kind:?}{main}\n  bounds  {w}x{h} at {x},{y}\n",
+            "{name}\n  id      {id}\n  key     {key}\n  kind    {kind:?}{main}\n  bounds  {w}x{h} at {x},{y}",
             name = display.name(),
             id = display.id(),
             key = display.key(),
@@ -22,6 +25,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             x = bounds.x,
             y = bounds.y,
         );
+
+        match BuiltIn::open(&display) {
+            Ok(panel) => match panel.get() {
+                Ok(level) => println!("  level   {level} via {}", panel.name()),
+                Err(failure) => println!("  level   unreadable: {failure}"),
+            },
+            Err(refusal) => println!("  level   {refusal}"),
+        }
+        println!();
     }
     Ok(())
 }

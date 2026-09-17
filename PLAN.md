@@ -20,10 +20,10 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 3. The built-in panel
 
-- [ ] `BrightnessBackend`, the trait the other two entries implement
-- [ ] `DisplayServices` bound at run time through `dlopen`, so a macOS release
+- [x] `BrightnessBackend`, the trait the other two entries implement
+- [x] `DisplayServices` bound at run time through `dlopen`, so a macOS release
       that drops the symbol is a clear error rather than a failure to launch
-- [ ] Get and set on the built-in display
+- [x] Get and set on the built-in display
 
 ## 4. External monitors over DDC/CI
 

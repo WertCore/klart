@@ -18,11 +18,13 @@ compile_error!(
     "klart drives macOS display services directly and has no backend for other platforms"
 );
 
+mod backend;
 mod brightness;
 mod display;
 mod error;
 mod sys;
 
+pub use backend::{Backend, BuiltIn};
 pub use brightness::Brightness;
 pub use display::{Bounds, Display, DisplayKey, DisplayKind, displays};
 pub use error::{Error, Result};
