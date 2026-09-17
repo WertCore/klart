@@ -1,5 +1,5 @@
 [package]
-name = "helle-core"
+name = "klart-core"
 description = "Display discovery and brightness control for macOS"
 version.workspace = true
 edition.workspace = true

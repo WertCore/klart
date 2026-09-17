@@ -13,7 +13,7 @@
 // build for another target would be a silent no-op rather than a port.
 #[cfg(not(target_os = "macos"))]
 compile_error!(
-    "helle drives macOS display services directly and has no backend for other platforms"
+    "klart drives macOS display services directly and has no backend for other platforms"
 );
 
 mod brightness;

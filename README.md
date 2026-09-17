@@ -1,10 +1,12 @@
-# helle
+# klart
 
 Brightness control for every display attached to a Mac — the built-in panel and
 external monitors alike, from the menu bar or the command line.
 
 macOS dims the built-in display from the keyboard and leaves every other monitor
-to its own on-screen buttons. `helle` puts all of them on one control.
+to its own on-screen buttons. `klart` puts all of them on one control.
+
+*klart* is Norwegian for *bright*.
 
 ## Why this is three mechanisms rather than one
 

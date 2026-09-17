@@ -56,12 +56,12 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 8. Remember the levels
 
-- [ ] Per-display levels in `~/Library/Application Support/helle`
+- [ ] Per-display levels in `~/Library/Application Support/klart`
 - [ ] Restore on launch and on reconnect, keyed by the stable key from entry 2
 - [ ] Global hotkeys for brighter and dimmer across every display at once
 
 ## 9. Ship it
 
-- [ ] A `Helle.app` bundle with `LSUIElement`, so the agent starts without a
+- [ ] A `Klart.app` bundle with `LSUIElement`, so the agent starts without a
       Dock tile
 - [ ] A release workflow that builds and attaches it
