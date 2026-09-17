@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+# `cli` and `tray` join once there is something for them to drive; see PLAN.md.
+members = ["core"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/WertCore/helle"
+authors = ["helle contributors"]
+
+[workspace.dependencies]
+helle-core = { path = "core" }
+
+[profile.release]
+# A menu bar agent is resident for the whole login session, so its own footprint
+# is part of the product. These cost compile time and buy back binary size.
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
