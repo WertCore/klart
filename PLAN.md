@@ -357,3 +357,23 @@ Worth noting for review: both places that write to every display use an explicit
 loop rather than `all`, which short circuits — it would have landed the level on
 the first display and dropped it for the rest. Clippy suggested exactly that
 change and the note attached to its own lint is what caught it.
+
+## 16. Call a display what you call it
+
+- [x] `klart rename`, stored beside the levels
+- [x] Use it everywhere a display is shown
+
+Last of the polish items from the comparison. It matters for one case in
+particular: two monitors of the same model publish the same name, and telling
+them apart in a menu by their EDID serials is not something anyone should have to
+do.
+
+The name lives in the same file as the levels, marked by `:name` after the key.
+The colon is the point — entry 8's contract confines keys to
+`A-Z a-z 0-9 . _ -`, so a colon cannot occur inside one and the two kinds of line
+can never be confused. The value is free text and may contain anything, including
+an equals sign, because the line is split on the *first* one.
+
+Applied in `Control` rather than in `Display`. A `Display` is what the hardware
+says it is; a `Control` is how a person deals with it, and a chosen name is the
+person's.
