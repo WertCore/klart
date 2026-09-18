@@ -292,7 +292,7 @@ mod hardware {
         let attached = controls().expect("displays should open");
         let Some(control) = attached
             .iter()
-            .find(|found| found.mechanism() == "hardware+gamma")
+            .find(|found| found.mechanism() == Some("hardware+gamma"))
         else {
             panic!("no display on this machine pairs a backlight with a ramp");
         };

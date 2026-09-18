@@ -139,10 +139,12 @@ impl Row {
                 // reason it did not is on the line below when `list` asked.
                 Err(_) => "?".to_owned(),
             },
-            mechanism: if control.persists() {
-                control.mechanism().to_owned()
-            } else {
-                format!("{}*", control.mechanism())
+            mechanism: match (control.mechanism(), control.persists()) {
+                (Some(name), true) => name.to_owned(),
+                (Some(name), false) => format!("{name}*"),
+                // Nothing reaches this display. The reasons print underneath
+                // when `list` asked for them.
+                (None, _) => "none".to_owned(),
             },
             name: format!(
                 "{}{}",
