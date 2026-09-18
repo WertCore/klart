@@ -38,4 +38,5 @@ pub use diagnose::{Attempt, Note, Report, Verdict, diagnose};
 pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
 pub use identity::DisplayKey;
+pub use platform::{LoginItem, login_item, set_login_item};
 pub use remembered::{Remembered, path as remembered_path};

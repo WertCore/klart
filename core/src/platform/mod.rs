@@ -21,6 +21,7 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
+pub use macos::{LoginItem, login_item, set_login_item};
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{config_directory, diagnose, displays, open};
 

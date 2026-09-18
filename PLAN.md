@@ -306,3 +306,29 @@ cache. That distinguishes:
 Where a machine has one link of each kind, the probe says so, because one link
 failing proves only that something is wrong — another link succeeding through the
 same calls is what proves the difference is the link.
+
+## 14. Start with the session
+
+- [x] Register the bundle as a login item, from the menu and from the command line
+- [x] Show when macOS is waiting to be told it may
+
+Not a convenience. On a display with no hardware brightness control the level
+lasts exactly as long as this process does, because macOS reverts a gamma ramp
+when the process that set it exits. An agent that does not start at login means
+such a display is back at full brightness after every restart, whatever was asked
+for before it. That is the whole reason this is entry 14 rather than a footnote.
+
+`SMAppService` arrived in macOS 13 and the rest of this works further back, so the
+class is looked up before it is used rather than raising the crate's floor for one
+feature. It also registers a *bundle*: run as a bare binary out of `target/` there
+is nothing for the system to launch, and saying so is more use than passing on a
+framework's complaint about a path.
+
+Three states rather than two. macOS puts a newly registered login item in front of
+the person before it will honour it, and until they say yes in System Settings it
+is registered and not running. Reporting that as "on" would be a lie, so it is its
+own state in the menu and on the command line.
+
+It lives in `core` rather than in the agent, even though the agent is what gets
+launched, because `klart` has no settings window and the command line is where its
+settings live. Both binaries sit in the same bundle, so either can register it.

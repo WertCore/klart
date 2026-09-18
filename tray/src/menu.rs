@@ -12,13 +12,18 @@
 
 use std::rc::Rc;
 
+use klart_core::LoginItem;
+
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadOnly, define_class, msg_send, sel};
-use objc2_app_kit::{NSMenu, NSMenuItem, NSSlider, NSView};
+use objc2_app_kit::{
+    NSControlStateValueOff, NSControlStateValueOn, NSMenu, NSMenuItem, NSSlider, NSView,
+};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
 use crate::driver::Driver;
+
 use crate::request::{self, Request};
 
 /// Wide enough for a slider that can be aimed, narrow enough not to make the
@@ -84,6 +89,20 @@ define_class!(
             // Rebuilding the menu would end the drag, so the heading is
             // relabelled in place.
             self.relabel(display, percent);
+        }
+
+        #[unsafe(method(toggleLoginItem:))]
+        fn toggle_login_item(&self, sender: &NSMenuItem) {
+            // The item's own tick is the current state, so the request is its
+            // opposite. Set here as well so the tick moves with the click; if
+            // the system disagrees the next rebuild corrects it.
+            let wanted = sender.state() != NSControlStateValueOn;
+            sender.setState(if wanted {
+                NSControlStateValueOn
+            } else {
+                NSControlStateValueOff
+            });
+            request::push(Request::SetLoginItem(wanted));
         }
 
         #[unsafe(method(lookAgain:))]
@@ -185,6 +204,7 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
     }
 
     menu.addItem(&NSMenuItem::separatorItem(mtm));
+    menu.addItem(&login_item(mtm, &controller));
     menu.addItem(&command(
         mtm,
         &controller,
@@ -218,6 +238,34 @@ fn command(
         item.setTarget(Some(controller));
     }
     item
+}
+
+/// The row that decides whether the agent comes back after a restart.
+///
+/// Worth a place in the menu rather than leaving it to System Settings: on a
+/// display with no hardware brightness control the level lasts only as long as
+/// this process, so an agent that does not start at login means that display is
+/// back at full brightness after every restart.
+fn login_item(mtm: MainThreadMarker, controller: &Controller) -> Retained<NSMenuItem> {
+    match klart_core::login_item() {
+        LoginItem::Unavailable => label(mtm, "Start at login — needs the app bundle"),
+
+        LoginItem::AwaitingApproval => {
+            // Registered, and macOS is waiting for the person to allow it in
+            // System Settings. Saying "on" here would be a lie.
+            label(mtm, "Start at login — allow it in System Settings")
+        }
+
+        state => {
+            let item = command(mtm, controller, "Start at login", sel!(toggleLoginItem:));
+            item.setState(if state == LoginItem::Enabled {
+                NSControlStateValueOn
+            } else {
+                NSControlStateValueOff
+            });
+            item
+        }
+    }
 }
 
 /// A menu row that is a slider.

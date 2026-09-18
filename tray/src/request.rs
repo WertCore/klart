@@ -20,6 +20,8 @@ use std::sync::Mutex;
 pub enum Request {
     /// Look for displays again.
     Refresh,
+    /// Start with the session, or stop doing so.
+    SetLoginItem(bool),
     /// Stop the agent.
     Quit,
 }

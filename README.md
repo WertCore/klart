@@ -47,6 +47,7 @@ $ klart up --all
 $ klart get --json
 $ klart restore
 $ klart probe        # why won't this monitor answer?
+$ klart autostart on # start the menu bar agent at login
 ```
 
 Commands act on the display holding the menu bar unless told otherwise.
@@ -65,7 +66,9 @@ be edited by hand.
 agent: no Dock tile, no window.
 
 It is also the only way to hold a display dimmed that has no hardware brightness
-control, because macOS reverts a gamma ramp when the process that set it exits.
+control, because macOS reverts a gamma ramp when the process that set it exits —
+which is why `klart autostart on` is worth setting if you have such a display.
+Without it, that display is back at full brightness after every restart.
 
 ## Status
 
