@@ -21,8 +21,10 @@
 
 mod backend;
 mod brightness;
+mod combined;
 mod control;
 mod ddc;
+mod diagnose;
 mod display;
 mod error;
 mod identity;
@@ -32,6 +34,7 @@ mod remembered;
 pub use backend::Backend;
 pub use brightness::Brightness;
 pub use control::{Control, controls};
+pub use diagnose::{Attempt, Note, Report, Verdict, diagnose};
 pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
 pub use identity::DisplayKey;

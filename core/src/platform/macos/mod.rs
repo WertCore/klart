@@ -13,6 +13,7 @@
 
 mod av_service;
 mod built_in;
+mod diagnose;
 mod display_services;
 mod gamma;
 mod graphics;
@@ -20,10 +21,13 @@ mod ioreg;
 mod link;
 
 use crate::backend::Backend;
+use crate::combined::Combined;
 use crate::ddc::Ddc;
 use crate::display::{Display, Found};
 use crate::error::{Error, Result};
 use crate::identity::Identity;
+
+pub(crate) use self::diagnose::diagnose;
 
 use self::built_in::BuiltIn;
 use self::gamma::Gamma;
@@ -82,26 +86,42 @@ pub(crate) fn config_directory() -> Option<std::path::PathBuf> {
 /// Opens the best mechanism that will have this display.
 ///
 /// In order of how real the result is: the panel's own framework, then DDC/CI,
-/// then the gamma ramp. The first two move a backlight; the third only darkens
-/// the picture, so it is what is left rather than a peer of the other two.
+/// then the gamma ramp on its own. The first two move a backlight; the third
+/// only darkens the picture, so it is what is left rather than a peer of them.
+///
+/// Where a backlight is found it is *paired* with the ramp rather than used
+/// alone, so that the range carries on below the point the backlight stops at.
+/// See [`crate::combined`].
 ///
 /// # Errors
 ///
-/// Only if all three refuse, which in practice means the display went away
+/// Only if everything refuses, which in practice means the display went away
 /// between being listed and being opened — the gamma ramp is available on any
 /// display that exists, which is why it is last.
 pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> {
     let mut refusals = Vec::new();
 
-    match BuiltIn::open(display) {
-        Ok(panel) => return Ok((Box::new(panel), refusals)),
-        Err(refusal) => refusals.push(refusal),
-    }
+    let backlight: Option<Box<dyn Backend>> = match BuiltIn::open(display) {
+        Ok(panel) => Some(Box::new(panel)),
+        Err(refusal) => {
+            refusals.push(refusal);
+            match AvLink::open(display).and_then(|link| Ddc::open(link, display.key().as_str())) {
+                Ok(monitor) => Some(Box::new(monitor)),
+                Err(refusal) => {
+                    refusals.push(refusal);
+                    None
+                }
+            }
+        }
+    };
 
-    match AvLink::open(display).and_then(|link| Ddc::open(link, display.key().as_str())) {
-        Ok(monitor) => return Ok((Box::new(monitor), refusals)),
-        Err(refusal) => refusals.push(refusal),
-    }
+    let ramp = Gamma::open(display)?;
 
-    Ok((Box::new(Gamma::open(display)?), refusals))
+    match backlight {
+        Some(backlight) => Ok((
+            Box::new(Combined::new(backlight, Box::new(ramp))?),
+            refusals,
+        )),
+        None => Ok((Box::new(ramp), refusals)),
+    }
 }

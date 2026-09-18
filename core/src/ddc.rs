@@ -208,7 +208,7 @@ fn checksum(seed: u8, body: &[u8]) -> u8 {
 }
 
 /// A Get VCP Feature request.
-fn get_request(feature: u8) -> [u8; 4] {
+pub(crate) fn get_request(feature: u8) -> [u8; 4] {
     let mut frame = [0x80 | 2, OP_GET, feature, 0];
     frame[3] = checksum(DISPLAY_ADDRESS ^ HOST_ADDRESS, &frame[..3]);
     frame

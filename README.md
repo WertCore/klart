@@ -46,6 +46,7 @@ $ klart down 10 --display LS32
 $ klart up --all
 $ klart get --json
 $ klart restore
+$ klart probe        # why won't this monitor answer?
 ```
 
 Commands act on the display holding the menu bar unless told otherwise.
