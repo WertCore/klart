@@ -78,6 +78,21 @@ address — `0x50` returns the EDID header and `0x37` returns zeros — and it
 accepts writes. So the difference is the link, not the interface and not the
 machine.
 
+Everything else that could have been a way round it has been ruled out by
+measurement rather than by assumption:
+
+- **`CoreDisplay`** publishes `CoreDisplay_Display_SetUserBrightness` and
+  friends. Its signature does not validate: asked for the built-in panel's level,
+  which `DisplayServices` reports as 0.835, it answers 1.000. An unvalidated
+  signature on an unpublished symbol is undefined behaviour rather than a failed
+  call, so it is not used. `DisplayServices` has in any case already said it
+  cannot reach this display.
+- **A second I2C path.** `DCPAVServiceProxy` is the only display-facing I2C class
+  in the registry; the other two matches are the SoC's own controllers.
+- **A capability to switch on.** `IOAVServiceCopyProperties` returns identical
+  dictionaries for the working link and the failing one, differing only in
+  `Location`. There is no flag, nothing to enable; the firmware degrades quietly.
+
 The link is `DP -> HDMI`, which is to say the DisplayPort-to-HDMI conversion
 happens inside the cable. Ticking these two boxes needs a link with no conversion
 in it: USB-C to DisplayPort, into the monitor's DisplayPort input. The probe will
