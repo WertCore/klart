@@ -8,11 +8,17 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
-# Both are cut down to the headers actually used. `objc2-io-kit` is deliberately
-# absent: it binds IOKit's USB, HID and power families but none of IOKitLib's
-# service and registry calls, which are what display discovery needs, so those
-# are declared in `sys::ioreg` instead.
-[dependencies]
+# Under a target table rather than plain `[dependencies]`, so that a build for
+# another platform stops at `platform`'s own `compile_error!` — which names the
+# two functions a port implements — rather than inside a binding crate that
+# refuses to compile off Apple hardware. Without this the seam is a claim rather
+# than a fact.
+#
+# The objc2 crates are cut down to the headers actually used. `objc2-io-kit` is
+# deliberately absent: it binds IOKit's USB, HID and power families but none of
+# IOKitLib's service and registry calls, which are what display discovery needs,
+# so those are declared in `platform::macos::ioreg` instead.
+[target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2.189"
 objc2 = { version = "0.6.4", default-features = false }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
