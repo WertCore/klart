@@ -70,8 +70,10 @@ fn main() -> ExitCode {
     loop {
         pump(&app);
 
-        // Anything a drag could not land while the menu was open.
+        // Anything a drag could not land while the menu was open, and then the
+        // levels it left behind.
         agent.driver.flush();
+        agent.driver.persist();
 
         for asked in request::drain() {
             match asked {
@@ -156,6 +158,11 @@ impl Agent {
         // job is to be there when a display appears, so it starts with an empty
         // menu and picks them up when they arrive.
         let driver = Rc::new(Driver::new(controls().unwrap_or_default()));
+
+        // Before the menu is built, so the levels in it are the ones the
+        // displays are actually sitting at.
+        driver.restore();
+
         let menu = menu::build(mtm, &driver);
 
         let item = status::install(mtm);
@@ -170,6 +177,10 @@ impl Agent {
             Ok(found) => self.driver.replace(found),
             Err(problem) => eprintln!("klart-tray: {problem}"),
         }
+
+        // A display that has just appeared has whatever level it powered on
+        // with, which for a gamma-dimmed one is none of this process's doing.
+        self.driver.restore();
 
         self.menu = menu::build(mtm, &self.driver);
         self.item.setMenu(Some(&self.menu.menu));

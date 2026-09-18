@@ -27,6 +27,7 @@ mod display;
 mod error;
 mod identity;
 mod platform;
+mod remembered;
 
 pub use backend::Backend;
 pub use brightness::Brightness;
@@ -34,3 +35,4 @@ pub use control::{Control, controls};
 pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
 pub use identity::DisplayKey;
+pub use remembered::{Remembered, path as remembered_path};

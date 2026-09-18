@@ -45,6 +45,7 @@ $ klart set 60
 $ klart down 10 --display LS32
 $ klart up --all
 $ klart get --json
+$ klart restore
 ```
 
 Commands act on the display holding the menu bar unless told otherwise.
@@ -52,6 +53,10 @@ Commands act on the display holding the menu bar unless told otherwise.
 
 A `*` on the mechanism means the change does not outlive the command — see the
 gamma row of the table above.
+
+Levels are remembered in `~/Library/Application Support/klart/levels.conf`, keyed
+by display rather than by port, so they survive a reconnect. The file is meant to
+be edited by hand.
 
 ## In the menu bar
 

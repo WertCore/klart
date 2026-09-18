@@ -6,7 +6,7 @@ mod select;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
-use klart_core::{Brightness, Control, controls};
+use klart_core::{Brightness, Control, Remembered, controls};
 
 use crate::select::{Candidate, Selection};
 
@@ -56,6 +56,13 @@ enum Command {
         /// How far, in percentage points.
         #[arg(default_value_t = DEFAULT_STEP)]
         step: f32,
+        #[command(flatten)]
+        target: Target,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Put every display back to the level klart last saw it at.
+    Restore {
         #[command(flatten)]
         target: Target,
         #[command(flatten)]
@@ -157,17 +164,19 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
             output,
         ),
         Command::Get { target, output }
+        | Command::Restore { target, output }
         | Command::Set { target, output, .. }
         | Command::Up { target, output, .. }
         | Command::Down { target, output, .. } => (target, output),
     };
 
     let chosen = select::resolve(&candidates(&found), &target.selection())?;
+    let mut remembered = Remembered::load();
 
     for &index in &chosen {
         let control = &found[index];
         match &cli.command {
-            Command::List { .. } | Command::Get { .. } => {}
+            Command::List { .. } | Command::Get { .. } => continue,
             Command::Set { percent, .. } => {
                 control.set(Brightness::from_percent(percent.0))?;
             }
@@ -177,7 +186,26 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
             Command::Down { step, .. } => {
                 control.adjust(-step / 100.0)?;
             }
+            Command::Restore { .. } => {
+                let Some(level) = remembered.level_for(control.display().key()) else {
+                    continue;
+                };
+                control.set(level)?;
+            }
         }
+
+        // Recorded after the fact rather than from the argument, because `up`
+        // and `down` saturate and `set` on a DDC monitor lands on the nearest
+        // step of that monitor's own scale. What is stored should be where the
+        // display actually is.
+        if let Ok(landed) = control.get() {
+            remembered.remember(control.display().key(), landed);
+        }
+    }
+
+    if let Err(problem) = remembered.save() {
+        // Worth saying and not worth failing for: the brightness did change.
+        eprintln!("klart: could not save levels: {problem}");
     }
 
     let changed = !matches!(cli.command, Command::List { .. } | Command::Get { .. });

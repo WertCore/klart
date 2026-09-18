@@ -10,7 +10,7 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::{Duration, Instant};
 
-use klart_core::{Brightness, Control};
+use klart_core::{Brightness, Control, Remembered};
 
 /// The shortest gap between two writes to one display.
 ///
@@ -24,6 +24,8 @@ const WRITE_GAP: Duration = Duration::from_millis(60);
 pub struct Driver {
     controls: RefCell<Vec<Control>>,
     last_written: RefCell<Vec<Instant>>,
+    /// The level each display was last left at, across runs.
+    remembered: RefCell<Remembered>,
     /// A value that arrived too soon after the last write.
     ///
     /// Held rather than dropped because the value most likely to fall inside the
@@ -38,6 +40,7 @@ impl Driver {
         Self {
             controls: RefCell::new(controls),
             last_written: RefCell::new(last_written),
+            remembered: RefCell::new(Remembered::load()),
             pending: Cell::new(None),
         }
     }
@@ -52,6 +55,45 @@ impl Driver {
         *self.last_written.borrow_mut() = vec![far_enough_back(); controls.len()];
         *self.controls.borrow_mut() = controls;
         self.pending.set(None);
+    }
+
+    /// Puts back the levels of displays that could not keep their own.
+    ///
+    /// Deliberately not every display. A monitor whose backlight this can move
+    /// remembers its own setting, through a reconnect and through a reboot, so
+    /// there is nothing to put back — and putting one back anyway would overrule
+    /// whatever the person did with the brightness keys or the monitor's own
+    /// buttons since. A display dimmed with its gamma ramp really has lost the
+    /// setting, every time this process exits, and is the case this exists for.
+    ///
+    /// `klart restore` on the command line does restore everything, because
+    /// there it was asked for rather than assumed.
+    pub fn restore(&self) {
+        let controls = self.controls.borrow();
+        let remembered = self.remembered.borrow();
+
+        for control in controls.iter() {
+            if control.persists() {
+                continue;
+            }
+            let Some(level) = remembered.level_for(control.display().key()) else {
+                continue;
+            };
+            if let Err(problem) = control.set(level) {
+                eprintln!("klart-tray: {}: {problem}", control.display().name());
+            }
+        }
+    }
+
+    /// Writes out anything remembered since the last time, if there is any.
+    ///
+    /// Called from the pump rather than from the write path: a drag records a
+    /// level every sixty milliseconds and the file system has no reason to hear
+    /// about all of them.
+    pub fn persist(&self) {
+        if let Err(problem) = self.remembered.borrow_mut().save() {
+            eprintln!("klart-tray: could not save levels: {problem}");
+        }
     }
 
     /// Asks for a level, now if the display will take it and shortly if not.
@@ -90,9 +132,15 @@ impl Driver {
         }
         *last = Instant::now();
 
-        if let Err(problem) = control.set(Brightness::from_percent(f32::from(percent))) {
+        let level = Brightness::from_percent(f32::from(percent));
+        if let Err(problem) = control.set(level) {
             eprintln!("klart-tray: {}: {problem}", control.display().name());
+            return true;
         }
+
+        self.remembered
+            .borrow_mut()
+            .remember(control.display().key(), level);
         true
     }
 }
