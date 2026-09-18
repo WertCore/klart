@@ -81,8 +81,12 @@ change; nothing is ticked there until it has run against real hardware.
 
 ## Installing
 
-Take the archive from [releases](https://github.com/WertCore/klart/releases),
-unzip it, and move `Klart.app` to `/Applications`.
+Archives for all three platforms are on the
+[releases page](https://github.com/WertCore/klart/releases).
+
+### macOS
+
+Unzip and move `Klart.app` to `/Applications`.
 
 It is not signed or notarised, so macOS refuses the first launch of anything that
 arrived through a browser. Right-click it and choose Open, or:
@@ -100,6 +104,27 @@ ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
 Apple silicon only. An Intel Mac would enumerate its displays and reach neither
 hardware mechanism, because the registry node both of them are found through is
 one Intel Macs do not publish.
+
+### Linux
+
+```sh
+tar xzf klart-*-linux-x86_64.tar.gz
+./klart list
+```
+
+Two permissions it will want, and neither is this program's to grant: external
+monitors need read and write on `/dev/i2c-*`, usually through the `i2c` group or
+a udev rule, and the laptop panel needs write on
+`/sys/class/backlight/*/brightness`. `klart probe` says which mechanism reached
+which display and why the others did not.
+
+### Windows
+
+```
+klart.exe list
+```
+
+Unsigned, so SmartScreen warns on first run.
 
 ## Building
 

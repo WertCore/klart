@@ -469,3 +469,22 @@ arranged.
 
 The seam guard moved to `aarch64-apple-ios`, because all three desktop platforms
 now have a module and the check needs a target that does not.
+
+## 19. Ship the other two
+
+- [x] Build and archive the command line on Linux and Windows, from their own
+      runners
+- [x] One release carrying all three
+
+Cross-compiling would have been fewer jobs and the wrong answer: a binary built
+on a Mac for Linux is one nothing has run the tests against, and the entire point
+of shipping those two is that somebody can run them. So each platform builds its
+own artefact, behind its own gates, and a last job gathers them.
+
+`tar` on Linux and zip on Windows, for the same reason in opposite directions:
+tar keeps the executable bit that a zip drops, and Explorer opens a zip without
+anything installed.
+
+The release notes say plainly which platforms have been run on real hardware and
+which have not, and what permissions Linux will want that this program cannot
+grant itself.
