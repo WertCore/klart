@@ -39,6 +39,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSStatusBarButton",
     "NSStatusItem",
     "NSView",
+    # A status item's button has a window of its own, and its number is how a
+    # scroll event is recognised as being over the icon.
+    "NSWindow",
     # `NSWorkspace` is where the sleep and wake notifications are posted.
     "NSWorkspace",
 ] }

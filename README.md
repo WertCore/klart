@@ -140,6 +140,11 @@ control, because macOS reverts a gamma ramp when the process that set it exits �
 which is why `klart autostart on` is worth setting if you have such a display.
 Without it, that display is back at full brightness after every restart.
 
+Scrolling over the icon changes brightness without opening anything. A wheel
+notch is a step; a trackpad is continuous. It moves every display by the same
+amount from wherever each of them is, rather than setting them all to one number
+— so two displays balanced against each other stay balanced.
+
 The agent puts levels back after a sleep. Plenty of monitors come back at full
 brightness of their own accord, and a write sent the instant the machine wakes is
 accepted and dropped — the link returns before the panel behind it does. So the

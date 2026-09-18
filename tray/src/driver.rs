@@ -110,6 +110,19 @@ pub struct Driver {
     pending: Cell<Option<(usize, u8)>>,
     /// A wake restore in progress, if there is one.
     restoring: RefCell<Option<Restoring>>,
+    /// Scrolling that has not yet become a brightness change.
+    ///
+    /// A trackpad reports a fraction of a percent at a time, and rounding each
+    /// one to a whole percent would round almost all of them to nothing. Kept
+    /// instead until it adds up to a step.
+    scroll_owed: Cell<f32>,
+    /// When the last scroll-driven change went out.
+    ///
+    /// Its own clock rather than the per-display one, because a scroll moves
+    /// every display together and they have to be gated as a group: gating them
+    /// individually would let some take a step the others missed and pull them
+    /// apart.
+    scrolled_at: Cell<Instant>,
 }
 
 impl Driver {
@@ -122,6 +135,8 @@ impl Driver {
             pending_all: Cell::new(None),
             pending: Cell::new(None),
             restoring: RefCell::new(None),
+            scroll_owed: Cell::new(0.0),
+            scrolled_at: Cell::new(far_enough_back()),
         }
     }
 
@@ -260,6 +275,69 @@ impl Driver {
             }
             *slot = None;
         }
+    }
+
+    /// Takes scrolling over the menu bar icon, in percent.
+    ///
+    /// Relative, where the menu's combined slider is absolute, and deliberately:
+    /// a slider is a position and setting them all to it is what dragging one
+    /// means, but a scroll is a nudge from wherever each display already is. A
+    /// scroll that flattened two displays a person had balanced by eye onto the
+    /// same number would be a surprising thing for a wheel to do.
+    pub fn scroll(&self, percent: f32) {
+        // Anything not a number would poison the running total for the rest of
+        // the process, and there is no value in it to recover.
+        if !percent.is_finite() {
+            return;
+        }
+
+        let owed = self.scroll_owed.get() + percent;
+        self.scroll_owed.set(owed);
+
+        if self.scrolled_at.get().elapsed() < WRITE_GAP {
+            return;
+        }
+
+        // Whole percents only. The remainder stays owed, which is what makes a
+        // slow trackpad scroll move at all.
+        let whole = owed.trunc();
+        if whole == 0.0 {
+            return;
+        }
+        self.scroll_owed.set(owed - whole);
+        self.scrolled_at.set(Instant::now());
+
+        let count = self.controls.borrow().len();
+        for display in 0..count {
+            self.nudge(display, whole);
+        }
+    }
+
+    /// Moves one display from wherever it is.
+    ///
+    /// Reads before writing, so that a change made anywhere else — the monitor's
+    /// own buttons, another program — is what this steps from.
+    fn nudge(&self, display: usize, percent: f32) {
+        let controls = self.controls.borrow();
+        let Some(control) = controls.get(display) else {
+            return;
+        };
+        let Ok(current) = control.get() else {
+            // Nothing to step from. Silent: a display that cannot be read is
+            // already reported wherever it was opened, and a scroll is not the
+            // place to say it again once per event.
+            return;
+        };
+
+        let moved = current.stepped(percent / 100.0);
+        if let Err(problem) = control.set(moved) {
+            eprintln!("klart-tray: {}: {problem}", control.name());
+            return;
+        }
+
+        self.remembered
+            .borrow_mut()
+            .remember(control.display().key(), moved);
     }
 
     /// Writes out anything remembered since the last time, if there is any.
@@ -484,6 +562,64 @@ mod tests {
             "a refusal must not push the next attempt further out"
         );
         assert!(restoring.may_attempt(start + RESTORE_RETRY));
+    }
+
+    /// A trackpad reports a fraction of a percent at a time.
+    ///
+    /// Rounding each event on its own would round almost every one of them to
+    /// nothing, and scrolling over the icon with a trackpad would do nothing at
+    /// all — which is the failure this accumulator exists to prevent.
+    #[test]
+    fn scrolling_smaller_than_a_percent_adds_up_instead_of_vanishing() {
+        let driver = Driver::new(Vec::new());
+
+        driver.scroll(0.4);
+        assert!(
+            (driver.scroll_owed.get() - 0.4).abs() < f32::EPSILON,
+            "a scroll too small to act on must be kept, not dropped"
+        );
+
+        driver.scroll(0.4);
+        assert!((driver.scroll_owed.get() - 0.8).abs() < f32::EPSILON);
+
+        // Over a whole percent now, so a step goes out and the remainder stays.
+        driver.scroll(0.4);
+        assert!(
+            (driver.scroll_owed.get() - 0.2).abs() < 1e-5,
+            "the fraction past the step is still owed, not discarded: {}",
+            driver.scroll_owed.get()
+        );
+    }
+
+    #[test]
+    fn scrolling_down_accumulates_the_same_way() {
+        let driver = Driver::new(Vec::new());
+
+        driver.scroll(-0.4);
+        driver.scroll(-0.4);
+        driver.scroll(-0.4);
+
+        assert!(
+            (driver.scroll_owed.get() + 0.2).abs() < 1e-5,
+            "downward scrolling must round towards zero too: {}",
+            driver.scroll_owed.get()
+        );
+    }
+
+    /// One bad event would otherwise make the icon dead for the whole session.
+    #[test]
+    fn a_scroll_that_is_not_a_number_does_not_poison_the_total() {
+        let driver = Driver::new(Vec::new());
+
+        driver.scroll(0.5);
+        driver.scroll(f32::NAN);
+        driver.scroll(f32::INFINITY);
+
+        assert!(
+            driver.scroll_owed.get().is_finite(),
+            "the running total has to stay usable"
+        );
+        assert!((driver.scroll_owed.get() - 0.5).abs() < f32::EPSILON);
     }
 
     /// The quantisation case from `close_enough`'s own documentation.
