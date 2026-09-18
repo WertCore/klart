@@ -19,6 +19,7 @@
 
 #![deny(missing_docs)]
 
+mod autostart;
 mod backend;
 mod brightness;
 mod combined;
@@ -26,11 +27,22 @@ mod control;
 mod ddc;
 mod diagnose;
 mod display;
+// Compiled everywhere though macOS never calls it: the IORegistry hands that
+// platform the same fields already parsed. It stays in the build so that its
+// tests run here too, and those tests are the ones that check a raw EDID
+// produces the display key macOS arrived at by a different route — which is
+// least convincing on the platform that cannot run it.
+#[cfg_attr(
+    target_os = "macos",
+    allow(dead_code, reason = "parsed by the IORegistry there")
+)]
+mod edid;
 mod error;
 mod identity;
 mod platform;
 mod remembered;
 
+pub use autostart::LoginItem;
 pub use backend::Backend;
 pub use brightness::Brightness;
 pub use control::{Control, controls};
@@ -38,5 +50,5 @@ pub use diagnose::{Attempt, Note, Report, Verdict, diagnose};
 pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
 pub use identity::DisplayKey;
-pub use platform::{LoginItem, login_item, set_login_item};
+pub use platform::{login_item, set_login_item};
 pub use remembered::{Remembered, path as remembered_path};

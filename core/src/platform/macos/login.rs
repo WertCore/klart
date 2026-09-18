@@ -18,25 +18,7 @@ use objc2::runtime::AnyClass;
 use objc2_foundation::NSBundle;
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
-/// Whether the agent is set to start with the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoginItem {
-    /// It will start at login.
-    Enabled,
-    /// It will not.
-    Disabled,
-    /// It has been registered and is waiting to be allowed.
-    ///
-    /// macOS puts a newly registered login item in front of the person before it
-    /// will honour it. Until they say yes in System Settings, this is where it
-    /// stays — which is why it is worth showing rather than reporting as enabled.
-    AwaitingApproval,
-    /// This build cannot ask the question.
-    ///
-    /// Either it is not running from an application bundle, so there is nothing
-    /// for the system to launch, or the system is older than `SMAppService`.
-    Unavailable,
-}
+use crate::autostart::LoginItem;
 
 /// Whether the agent will start with the session.
 pub fn status() -> LoginItem {

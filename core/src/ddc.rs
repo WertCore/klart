@@ -41,7 +41,11 @@ pub(crate) const DATA_ADDRESS: u32 = 0x51;
 const DISPLAY_ADDRESS: u8 = 0x6e;
 
 /// The host's address, likewise.
-const HOST_ADDRESS: u8 = 0x51;
+///
+/// Public within the crate because a transport that cannot carry it out of band
+/// — a raw I2C write on Linux, as against macOS's interface, which takes it as
+/// an argument — has to put it on the wire itself.
+pub(crate) const HOST_ADDRESS: u8 = 0x51;
 
 /// The host's *receive* address, which is what a reply's checksum is seeded
 /// with.

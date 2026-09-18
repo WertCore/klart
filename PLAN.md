@@ -386,3 +386,42 @@ an equals sign, because the line is split on the *first* one.
 Applied in `Control` rather than in `Display`. A `Display` is what the hardware
 says it is; a `Control` is how a person deals with it, and a chosen name is the
 person's.
+
+## 17. Linux
+
+- [x] Connectors and EDID from `/sys/class/drm`
+- [x] The panel's backlight through `/sys/class/backlight`
+- [x] DDC/CI over `/dev/i2c-*`, reusing the protocol from entry 8
+- [x] Autostart as a freedesktop desktop entry
+- [x] CI that builds and tests it
+- [ ] Run it on a Linux machine
+
+**Written, compiled and tested by CI. Never run.** The last box is the only one
+that matters and it needs a machine this does not have.
+
+Entry 8 paid for itself here. The DDC/CI protocol needed no changes at all: Linux
+implements `Link`, which is two methods over an `I2C_RDWR` ioctl, and inherits
+the framing, the checksums, the reply validation and the retries along with their
+nine tests. One asymmetry was real and is documented where it is handled —
+`IOAVServiceWriteI2C` takes the host's source address as an argument and puts it
+on the wire itself, and a raw I2C write has nowhere to carry it, so Linux
+prepends it.
+
+The EDID parser is new and shared. macOS gets those fields pre-parsed from the
+IORegistry; Linux and Windows get 128 raw bytes. Writing a second parser against
+the same specification would have been a second chance to disagree about a
+display key that is supposed to be identical everywhere, so there is one, and its
+test asserts that a real block from the monitor on this desk produces
+`SAM-71e3-HNAW900001` — the key macOS arrived at through the IORegistry, by a
+completely different route.
+
+Two honest gaps. There is no geometry: where a display sits is a compositor's
+idea rather than the kernel's, and reaching a compositor means linking X11 or one
+of several Wayland protocols. Bounds are zero, and the only thing that costs is
+ordering two otherwise identical monitors. And there is no software fallback,
+because a gamma ramp needs a display server too — so a display that answers
+neither mechanism reports why rather than being dimmed badly.
+
+`klart-tray` is macOS only and says so. A tray on Linux is StatusNotifierItem
+over D-Bus or legacy XEmbed depending on the desktop; that is a new crate rather
+than a `cfg`.

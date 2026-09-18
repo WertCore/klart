@@ -29,7 +29,7 @@ use crate::error::{Error, Result};
 use crate::identity::Identity;
 
 pub(crate) use self::diagnose::diagnose;
-pub use self::login::{LoginItem, set as set_login_item, status as login_item};
+pub use self::login::{set as set_login_item, status as login_item};
 
 use self::built_in::BuiltIn;
 use self::gamma::Gamma;
