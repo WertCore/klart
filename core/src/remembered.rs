@@ -36,7 +36,21 @@ const PREAMBLE: &str = "\
 # `key = percent` is the level to put it back to, and `key:name = ...` is what to
 # call it. The keys are the ones `klart list` prints; they come from the display's
 # EDID, so they mean the same thing on any operating system.
+#
+# A key beginning with `:` is a setting rather than a display. The only one is
+# `:combined`, which is `absolute` (every display goes to the level shown) or
+# `relative` (every display moves by the same amount from where it was).
 ";
+
+/// What marks a line as a setting rather than anything about a display.
+///
+/// A display key cannot contain a colon — [`DisplayKey`]'s contract replaces
+/// anything outside `A-Z a-z 0-9 . _ -` — so a key that *begins* with one cannot
+/// be mistaken for a display, and no escaping is needed to tell them apart.
+const SETTING_PREFIX: char = ':';
+
+/// The setting that says how the combined control moves several displays.
+const COMBINED: &str = ":combined";
 
 /// What marks a line as a name rather than a level.
 ///
@@ -45,11 +59,52 @@ const PREAMBLE: &str = "\
 /// part of a key.
 const NAME_SUFFIX: &str = ":name";
 
+/// How a control that moves several displays at once moves them.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Combined {
+    /// Every display goes to the level shown.
+    ///
+    /// The default, because it is predictable at every point in the range: the
+    /// number on the control is the number every display is at. The cost is that
+    /// any balance someone had set between two displays is gone as soon as the
+    /// control is touched.
+    #[default]
+    Absolute,
+    /// Every display moves by the same amount from where it was.
+    ///
+    /// Keeps that balance. Measured from where the displays were when the
+    /// control was opened rather than accumulated step by step, so a display
+    /// that saturates at one end comes back to where it started instead of
+    /// having quietly lost the difference.
+    Relative,
+}
+
+impl Combined {
+    /// What this is called in the file.
+    fn written(self) -> &'static str {
+        match self {
+            Self::Absolute => "absolute",
+            Self::Relative => "relative",
+        }
+    }
+
+    /// The setting a file said, if it said one this understands.
+    fn read(text: &str) -> Option<Self> {
+        match text {
+            "absolute" => Some(Self::Absolute),
+            "relative" => Some(Self::Relative),
+            _ => None,
+        }
+    }
+}
+
 /// The level each display was last left at.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Remembered {
     levels: BTreeMap<String, u8>,
     names: BTreeMap<String, String>,
+    /// How a control that moves several displays at once moves them.
+    combined: Combined,
     /// Whether anything has changed since this was loaded or saved.
     dirty: bool,
 }
@@ -77,7 +132,7 @@ impl Remembered {
             }
         };
 
-        let (levels, names, complaints) = parse(&text);
+        let (levels, names, combined, complaints) = parse(&text);
         for complaint in complaints {
             eprintln!("klart: {}: {complaint}", path.display());
         }
@@ -85,6 +140,7 @@ impl Remembered {
         Self {
             levels,
             names,
+            combined,
             dirty: false,
         }
     }
@@ -127,6 +183,18 @@ impl Remembered {
         }
     }
 
+    /// How a control that moves several displays at once should move them.
+    #[must_use]
+    pub fn combined(&self) -> Combined {
+        self.combined
+    }
+
+    /// Sets how such a control moves them.
+    pub fn set_combined(&mut self, how: Combined) {
+        self.dirty |= self.combined != how;
+        self.combined = how;
+    }
+
     /// Whether anything has changed since this was loaded or saved.
     ///
     /// The menu bar agent writes a level on every step of a slider drag, and
@@ -157,7 +225,7 @@ impl Remembered {
         }
 
         let temporary = path.with_extension("conf.new");
-        std::fs::write(&temporary, render(&self.levels, &self.names))?;
+        std::fs::write(&temporary, render(&self.levels, &self.names, self.combined))?;
         std::fs::rename(&temporary, &path)?;
 
         self.dirty = false;
@@ -175,11 +243,17 @@ pub fn path() -> Option<PathBuf> {
 }
 
 /// Reads the file's contents, and says what it could not read.
-type Parsed = (BTreeMap<String, u8>, BTreeMap<String, String>, Vec<String>);
+type Parsed = (
+    BTreeMap<String, u8>,
+    BTreeMap<String, String>,
+    Combined,
+    Vec<String>,
+);
 
 fn parse(text: &str) -> Parsed {
     let mut levels = BTreeMap::new();
     let mut names = BTreeMap::new();
+    let mut combined = Combined::default();
     let mut complaints = Vec::new();
 
     for (number, line) in text.lines().enumerate() {
@@ -200,6 +274,26 @@ fn parse(text: &str) -> Parsed {
         let key = key.trim();
         if key.is_empty() {
             complaints.push(format!("line {}: no display key, ignoring", number + 1));
+            continue;
+        }
+
+        // A setting rather than anything about a display.
+        if key.starts_with(SETTING_PREFIX) {
+            if key == COMBINED {
+                match Combined::read(value.trim()) {
+                    Some(how) => combined = how,
+                    None => complaints.push(format!(
+                        "line {}: {:?} is not `absolute` or `relative`, ignoring",
+                        number + 1,
+                        value.trim()
+                    )),
+                }
+            } else {
+                complaints.push(format!(
+                    "line {}: unknown setting {key:?}, ignoring",
+                    number + 1
+                ));
+            }
             continue;
         }
 
@@ -229,12 +323,22 @@ fn parse(text: &str) -> Parsed {
         }
     }
 
-    (levels, names, complaints)
+    (levels, names, combined, complaints)
 }
 
 /// Writes the file's contents.
-fn render(levels: &BTreeMap<String, u8>, names: &BTreeMap<String, String>) -> String {
+fn render(
+    levels: &BTreeMap<String, u8>,
+    names: &BTreeMap<String, String>,
+    combined: Combined,
+) -> String {
     let mut text = String::from(PREAMBLE);
+
+    // Only when it is not the default, so that a file from someone who has never
+    // touched the setting does not grow a line saying they have not.
+    if combined != Combined::default() {
+        let _ = writeln!(text, "{COMBINED} = {}", combined.written());
+    }
 
     // `BTreeMap`, so the order is the keys' and a file written twice from the
     // same state is byte-identical.
@@ -266,7 +370,8 @@ mod tests {
         levels.insert("builtin".to_owned(), 44);
         levels.insert("SAM-71e3-HNAW900001".to_owned(), 70);
 
-        let (read_back, _, complaints) = parse(&render(&levels, &BTreeMap::new()));
+        let (read_back, _, _, complaints) =
+            parse(&render(&levels, &BTreeMap::new(), Combined::default()));
 
         assert_eq!(read_back, levels);
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -280,7 +385,8 @@ mod tests {
         levels.insert("SAM-71e3-00000000#1".to_owned(), 30);
         levels.insert("SAM-71e3-00000000#2".to_owned(), 60);
 
-        let (read_back, _, complaints) = parse(&render(&levels, &BTreeMap::new()));
+        let (read_back, _, _, complaints) =
+            parse(&render(&levels, &BTreeMap::new(), Combined::default()));
 
         assert_eq!(read_back, levels);
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -288,7 +394,7 @@ mod tests {
 
     #[test]
     fn comments_and_blank_lines_are_skipped_without_complaint() {
-        let (levels, _, complaints) = parse("# a note\n\n   \nbuiltin = 10\n");
+        let (levels, _, _, complaints) = parse("# a note\n\n   \nbuiltin = 10\n");
 
         assert_eq!(levels.get("builtin"), Some(&10));
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -296,7 +402,7 @@ mod tests {
 
     #[test]
     fn whitespace_around_either_side_is_not_part_of_anything() {
-        let (levels, _, _) = parse("   builtin   =   10   \n");
+        let (levels, _, _, _) = parse("   builtin   =   10   \n");
         assert_eq!(levels.get("builtin"), Some(&10));
     }
 
@@ -304,7 +410,7 @@ mod tests {
     fn a_file_with_windows_line_endings_reads_the_same() {
         // The whole point of the key contract is that this file crosses between
         // operating systems, so it will meet CRLF sooner or later.
-        let (levels, _, complaints) = parse("builtin = 10\r\nSAM-1-x = 20\r\n");
+        let (levels, _, _, complaints) = parse("builtin = 10\r\nSAM-1-x = 20\r\n");
 
         assert_eq!(levels.get("builtin"), Some(&10));
         assert_eq!(levels.get("SAM-1-x"), Some(&20));
@@ -313,7 +419,7 @@ mod tests {
 
     #[test]
     fn a_line_that_makes_no_sense_is_skipped_and_named() {
-        let (levels, _, complaints) = parse(
+        let (levels, _, _, complaints) = parse(
             "builtin = 10\n\
              nonsense\n\
              = 40\n\
@@ -336,7 +442,7 @@ mod tests {
 
     #[test]
     fn a_repeated_key_takes_the_last_value() {
-        let (levels, _, _) = parse("builtin = 10\nbuiltin = 90\n");
+        let (levels, _, _, _) = parse("builtin = 10\nbuiltin = 90\n");
         assert_eq!(levels.get("builtin"), Some(&90));
     }
 
@@ -393,7 +499,8 @@ mod tests {
         let mut names = BTreeMap::new();
         names.insert("builtin".to_owned(), "Laptop".to_owned());
 
-        let (read_levels, read_names, complaints) = parse(&render(&levels, &names));
+        let (read_levels, read_names, _, complaints) =
+            parse(&render(&levels, &names, Combined::default()));
 
         assert_eq!(read_levels, levels);
         assert_eq!(read_names, names);
@@ -401,11 +508,80 @@ mod tests {
     }
 
     #[test]
+    fn the_default_is_absolute_and_is_not_written_out() {
+        let (_, _, combined, _) = parse("builtin = 44\n");
+        assert_eq!(combined, Combined::Absolute);
+
+        // A file from someone who has never touched the setting must not grow a
+        // line saying they have not. The preamble documents the setting, so it
+        // is the uncommented lines that have to be free of it.
+        let written = render(&BTreeMap::new(), &BTreeMap::new(), Combined::default());
+        let settings = written
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .filter(|line| line.contains(COMBINED))
+            .count();
+
+        assert_eq!(
+            settings, 0,
+            "the default should leave no trace: {written:?}"
+        );
+    }
+
+    #[test]
+    fn a_setting_survives_a_round_trip() {
+        let written = render(&BTreeMap::new(), &BTreeMap::new(), Combined::Relative);
+        let (_, _, combined, complaints) = parse(&written);
+
+        assert_eq!(combined, Combined::Relative);
+        assert!(complaints.is_empty(), "{complaints:?}");
+    }
+
+    /// The whole reason the marker is a colon.
+    #[test]
+    fn a_setting_cannot_be_confused_with_a_display() {
+        // A display key can never begin with a colon, because `DisplayKey`
+        // replaces everything outside `A-Z a-z 0-9 . _ -`. So this line is a
+        // setting and cannot be a display, whatever a display is called.
+        let (levels, names, combined, complaints) = parse(":combined = relative\nbuiltin = 44\n");
+
+        assert_eq!(combined, Combined::Relative);
+        assert_eq!(levels.get("builtin"), Some(&44));
+        assert!(
+            !levels.contains_key(COMBINED),
+            "a setting must not be read as a display level"
+        );
+        assert!(names.is_empty());
+        assert!(complaints.is_empty(), "{complaints:?}");
+    }
+
+    #[test]
+    fn a_setting_that_makes_no_sense_is_complained_about_and_left_alone() {
+        let (_, _, combined, complaints) = parse(":combined = sideways\n");
+
+        assert_eq!(
+            combined,
+            Combined::Absolute,
+            "an unreadable setting must not change the behaviour"
+        );
+        assert_eq!(complaints.len(), 1, "{complaints:?}");
+    }
+
+    #[test]
+    fn an_unknown_setting_is_skipped_rather_than_read_as_a_level() {
+        let (levels, _, _, complaints) = parse(":fromthefuture = 3\nbuiltin = 44\n");
+
+        assert_eq!(levels.get("builtin"), Some(&44), "the rest still parses");
+        assert!(levels.is_empty() || !levels.contains_key(":fromthefuture"));
+        assert_eq!(complaints.len(), 1, "{complaints:?}");
+    }
+
+    #[test]
     fn a_name_is_written_even_for_a_display_with_no_level() {
         let mut names = BTreeMap::new();
         names.insert("SAM-1-x".to_owned(), "Desk".to_owned());
 
-        let (_, read_names, _) = parse(&render(&BTreeMap::new(), &names));
+        let (_, read_names, _, _) = parse(&render(&BTreeMap::new(), &names, Combined::default()));
 
         assert_eq!(read_names, names);
     }
@@ -420,7 +596,8 @@ mod tests {
             "Desk = the one on the left".to_owned(),
         );
 
-        let (_, read_names, complaints) = parse(&render(&BTreeMap::new(), &names));
+        let (_, read_names, _, complaints) =
+            parse(&render(&BTreeMap::new(), &names, Combined::default()));
 
         assert_eq!(
             read_names.get("builtin").map(String::as_str),

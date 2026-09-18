@@ -694,3 +694,44 @@ is what the match is against. **What is not verified is that a real scroll over
 the icon arrives in the agent's queue carrying that window number** — that needs
 somebody to scroll, and the box stays unticked until they have. The failure mode
 if it does not is that nothing happens, not that something wrong happens.
+
+## 25. Keep the displays' relative brightness, if that is wanted
+
+- [x] `:combined` in the configuration file, and a tick in the menu
+- [x] Relative measured from a baseline rather than accumulated
+
+Entry 15 gave the all-displays slider absolute semantics: every display goes to
+the level shown. That argument still holds and the default is unchanged. But it
+is a preference rather than a fact, and the other preference is a real one —
+somebody who has balanced two panels by eye wants that balance to survive the
+slider, and absolute destroys it on the first touch.
+
+So it is a setting, not a change.
+
+**Measured from a baseline, not accumulated.** This is the part that decides
+whether relative is any good. Applying each slider step as a delta means a
+display that pins at 100 silently swallows the overshoot, so bringing the slider
+back where it started does not bring the displays back where they started — the
+balance the mode exists to protect is lost by the mode itself. Every display's
+level is read when the menu is built, and every target is computed from there, so
+saturation is reversible. Six tests, and the one that matters pushes two displays
+thirty apart until the brighter pins and then brings them back.
+
+**The configuration file grew a third line shape.** `key = percent` is a level,
+`key:name = ...` is a name, and now a key beginning with `:` is a setting. The
+colon is what makes all three safe: `DisplayKey`'s contract confines a key to
+`A-Z a-z 0-9 . _ -`, so a key can neither contain a colon nor begin with one, and
+no escaping is needed anywhere. The default is not written out, so a file
+belonging to somebody who has never touched the setting does not grow a line
+saying they have not.
+
+The menu row is called "Keep displays' relative brightness" rather than anything
+with `absolute` or `relative` in it. Most people have never thought about the
+distinction and do not need to in order to know whether they want their displays
+to stay as they set them. It is only shown when there is a combined slider to
+configure, because a setting whose effect is not on screen is one nobody can
+connect to anything.
+
+Verified against the real configuration file: the setting round-trips, an
+unreadable value and an unknown setting each produce one complaint and change
+nothing.

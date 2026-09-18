@@ -10,7 +10,7 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::{Duration, Instant};
 
-use klart_core::{Brightness, Control, Remembered};
+use klart_core::{Brightness, Combined, Control, Remembered};
 
 /// The shortest gap between two writes to one display.
 ///
@@ -42,6 +42,20 @@ const RESTORE_RETRY: Duration = Duration::from_millis(500);
 /// range of 64 gives 26, which reads back as 41%. That is the display agreeing,
 /// not disagreeing, and retrying it for fifteen seconds would be wrong.
 const TOLERANCE: u8 = 2;
+
+/// Where everything was when a combined control was opened.
+///
+/// A relative move has to be measured from a fixed point rather than applied
+/// step by step. Accumulating would let a display that saturates at one end
+/// silently lose the difference, so that bringing the control back where it
+/// started would not bring the displays back where they started. Measuring from
+/// here means it does.
+struct Baseline {
+    /// Where the control itself started.
+    slider: u8,
+    /// Where each display was, or [`None`] for one that would not say.
+    levels: Vec<Option<u8>>,
+}
 
 /// A restore that is still being attempted.
 ///
@@ -116,6 +130,12 @@ pub struct Driver {
     /// one to a whole percent would round almost all of them to nothing. Kept
     /// instead until it adds up to a step.
     scroll_owed: Cell<f32>,
+    /// Where the displays were when the combined control was last built.
+    ///
+    /// Only needed for [`Combined::Relative`], and captured whenever the menu is
+    /// built rather than only then, because the menu does not say which mode it
+    /// is about to be dragged in and capturing it costs one read per display.
+    baseline: RefCell<Option<Baseline>>,
     /// When the last scroll-driven change went out.
     ///
     /// Its own clock rather than the per-display one, because a scroll moves
@@ -135,6 +155,7 @@ impl Driver {
             pending_all: Cell::new(None),
             pending: Cell::new(None),
             restoring: RefCell::new(None),
+            baseline: RefCell::new(None),
             scroll_owed: Cell::new(0.0),
             scrolled_at: Cell::new(far_enough_back()),
         }
@@ -155,6 +176,9 @@ impl Driver {
         // and those positions now mean different displays. Dropping it is not a
         // loss: whatever prompted the new set prompts its own restore.
         *self.restoring.borrow_mut() = None;
+        // Same reasoning, and the menu is rebuilt after a replace anyway, which
+        // is what takes a new one.
+        *self.baseline.borrow_mut() = None;
     }
 
     /// Puts back the levels of displays that could not keep their own.
@@ -340,6 +364,20 @@ impl Driver {
             .remember(control.display().key(), moved);
     }
 
+    /// How a combined control moves the displays.
+    pub fn combined(&self) -> Combined {
+        self.remembered.borrow().combined()
+    }
+
+    /// Changes how it moves them.
+    ///
+    /// Takes effect at the next drag rather than the current one, because the
+    /// menu is rebuilt before there can be another — and a mode that changed
+    /// under a drag would move the displays somewhere neither mode asked for.
+    pub fn set_combined(&self, how: Combined) {
+        self.remembered.borrow_mut().set_combined(how);
+    }
+
     /// Writes out anything remembered since the last time, if there is any.
     ///
     /// Called from the pump rather than from the write path: a drag records a
@@ -367,42 +405,99 @@ impl Driver {
     /// balance is silently lost anyway. Setting them all is predictable at every
     /// point in the range, and predictable wins in a control someone drags.
     pub fn request_all(&self, percent: u8) {
+        // Read and dropped before anything else borrows it: the write path takes
+        // `remembered` mutably, and holding this across that is a panic.
+        let how = self.remembered.borrow().combined();
+
+        if !self.apply_all(percent, how) {
+            // Held as one value rather than per display: the last position of a
+            // drag is the one that was chosen, and it is the same for all of
+            // them. In relative mode it is still the slider's position, and the
+            // targets are derived from it again on the retry rather than stored
+            // — the baseline has not moved, so they come out the same.
+            self.pending_all.set(Some(percent));
+        }
+    }
+
+    /// Puts a combined control's position onto every display.
+    ///
+    /// Returns whether every display took it. Rate limiting is the only reason
+    /// one would not; a display that is gone or refusing counts as taken,
+    /// because retrying either forever is worse than dropping the value.
+    fn apply_all(&self, percent: u8, how: Combined) -> bool {
         let count = self.controls.borrow().len();
 
         // Every display, not up to the first that is rate limited: `all` and
         // `any` both short circuit, which would leave the rest unwritten.
         let mut landed = true;
         for display in 0..count {
-            landed &= self.write(display, percent);
+            let Some(target) = self.target_for(display, percent, how) else {
+                continue;
+            };
+            landed &= self.write(display, target);
         }
-
-        // Held as one value rather than per display: the last position of a drag
-        // is the one that was chosen, and it is the same for all of them.
-        if !landed {
-            self.pending_all.set(Some(percent));
-        }
+        landed
     }
 
-    /// The level to start a combined control at.
+    /// What one display should go to for a combined control at `percent`.
+    ///
+    /// [`None`] for a display a relative move has nothing to measure from, which
+    /// is left alone rather than guessed at.
+    fn target_for(&self, display: usize, percent: u8, how: Combined) -> Option<u8> {
+        if how == Combined::Absolute {
+            return Some(percent);
+        }
+
+        let baseline = self.baseline.borrow();
+        let Some(baseline) = baseline.as_ref() else {
+            // No baseline means the control was never opened through
+            // `open_combined`. Absolute is the honest fallback: it is the
+            // default behaviour and it is what the number on the control says.
+            return Some(percent);
+        };
+
+        let started_at = (*baseline.levels.get(display)?)?;
+
+        // Signed, and clamped at both ends. Saturation is why the baseline is
+        // fixed rather than accumulated: a display pinned at 100 has not lost
+        // anything, and coming back down returns it to where it started.
+        let moved = i16::from(started_at) + i16::from(percent) - i16::from(baseline.slider);
+        u8::try_from(moved.clamp(0, 100)).ok()
+    }
+
+    /// The level to start a combined control at, recording what it started from.
     ///
     /// The mean of what the displays are at. Any single display's level would be
     /// an arbitrary choice, and a fixed position would jump the moment it was
     /// touched.
-    pub fn average(&self) -> u8 {
-        let controls = self.controls.borrow();
-        let levels: Vec<u16> = controls
+    ///
+    /// Reading every display is also what a relative drag needs, so the answers
+    /// are kept rather than discarded and counted twice.
+    pub fn open_combined(&self) -> u8 {
+        let levels: Vec<Option<u8>> = self
+            .controls
+            .borrow()
             .iter()
-            .filter_map(|control| control.get().ok())
-            .map(|level| u16::from(level.percent_rounded()))
+            .map(|control| control.get().ok().map(|level| level.percent_rounded()))
             .collect();
 
-        if levels.is_empty() {
-            return 0;
-        }
-        // `u16` and integer division: the sum of eight percentages cannot
-        // overflow it, and the result is a percentage either way.
-        u8::try_from(levels.iter().sum::<u16>() / u16::try_from(levels.len()).unwrap_or(1))
-            .unwrap_or(100)
+        let known: Vec<u16> = levels
+            .iter()
+            .flatten()
+            .map(|&level| u16::from(level))
+            .collect();
+
+        let slider = if known.is_empty() {
+            0
+        } else {
+            // `u16` and integer division: the sum of eight percentages cannot
+            // overflow it, and the result is a percentage either way.
+            u8::try_from(known.iter().sum::<u16>() / u16::try_from(known.len()).unwrap_or(1))
+                .unwrap_or(100)
+        };
+
+        *self.baseline.borrow_mut() = Some(Baseline { slider, levels });
+        slider
     }
 
     /// Lands whatever was held back, once its display will take it.
@@ -416,15 +511,8 @@ impl Driver {
         }
 
         if let Some(percent) = self.pending_all.get() {
-            let count = self.controls.borrow().len();
-
-            // Same reason as `request_all`: short circuiting here would land the
-            // held value on one display and drop it for the others.
-            let mut landed = true;
-            for display in 0..count {
-                landed &= self.write(display, percent);
-            }
-            if landed {
+            let how = self.remembered.borrow().combined();
+            if self.apply_all(percent, how) {
                 self.pending_all.set(None);
             }
         }
@@ -562,6 +650,112 @@ mod tests {
             "a refusal must not push the next attempt further out"
         );
         assert!(restoring.may_attempt(start + RESTORE_RETRY));
+    }
+
+    /// The baseline is what makes saturation reversible.
+    ///
+    /// Two displays 30 apart, pushed up until the brighter one pins at 100, and
+    /// brought back down. Accumulating deltas would have swallowed the overshoot
+    /// and closed the gap; measuring from where they started reopens it.
+    #[test]
+    fn a_display_that_saturates_comes_back_to_where_it_started() {
+        let driver = Driver::new(Vec::new());
+        *driver.baseline.borrow_mut() = Some(Baseline {
+            slider: 55,
+            levels: vec![Some(40), Some(70)],
+        });
+
+        // Pushed far enough that the second display pins.
+        assert_eq!(
+            driver.target_for(0, 100, Combined::Relative),
+            Some(85),
+            "40 + 45"
+        );
+        assert_eq!(
+            driver.target_for(1, 100, Combined::Relative),
+            Some(100),
+            "70 + 45 would be 115, which pins"
+        );
+
+        // And back where it began.
+        assert_eq!(driver.target_for(0, 55, Combined::Relative), Some(40));
+        assert_eq!(
+            driver.target_for(1, 55, Combined::Relative),
+            Some(70),
+            "the display that pinned has to come back to 70, not to 55 or to 85"
+        );
+    }
+
+    #[test]
+    fn a_relative_move_keeps_the_gap_between_displays() {
+        let driver = Driver::new(Vec::new());
+        *driver.baseline.borrow_mut() = Some(Baseline {
+            slider: 50,
+            levels: vec![Some(20), Some(80)],
+        });
+
+        let dimmer = driver
+            .target_for(0, 60, Combined::Relative)
+            .expect("a target");
+        let brighter = driver
+            .target_for(1, 60, Combined::Relative)
+            .expect("a target");
+
+        assert_eq!(brighter - dimmer, 60, "the 60 point gap has to survive");
+    }
+
+    #[test]
+    fn absolute_puts_every_display_on_the_number_shown() {
+        let driver = Driver::new(Vec::new());
+        *driver.baseline.borrow_mut() = Some(Baseline {
+            slider: 50,
+            levels: vec![Some(20), Some(80)],
+        });
+
+        // The baseline is present and must be ignored: absolute means the
+        // number on the control, whatever the displays were at.
+        assert_eq!(driver.target_for(0, 60, Combined::Absolute), Some(60));
+        assert_eq!(driver.target_for(1, 60, Combined::Absolute), Some(60));
+    }
+
+    /// Relative has nothing to measure from until the control has been opened.
+    #[test]
+    fn relative_without_a_baseline_falls_back_to_the_number_shown() {
+        let driver = Driver::new(Vec::new());
+
+        assert_eq!(
+            driver.target_for(0, 60, Combined::Relative),
+            Some(60),
+            "no baseline must not mean no movement"
+        );
+    }
+
+    /// A display that would not say where it was is left alone rather than
+    /// guessed at.
+    #[test]
+    fn a_display_that_could_not_be_read_is_not_moved_relatively() {
+        let driver = Driver::new(Vec::new());
+        *driver.baseline.borrow_mut() = Some(Baseline {
+            slider: 50,
+            levels: vec![None],
+        });
+
+        assert_eq!(driver.target_for(0, 60, Combined::Relative), None);
+    }
+
+    #[test]
+    fn a_relative_move_cannot_run_off_the_bottom() {
+        let driver = Driver::new(Vec::new());
+        *driver.baseline.borrow_mut() = Some(Baseline {
+            slider: 50,
+            levels: vec![Some(10)],
+        });
+
+        assert_eq!(
+            driver.target_for(0, 0, Combined::Relative),
+            Some(0),
+            "10 - 50 would be negative, which has to pin at 0 rather than wrap"
+        );
     }
 
     /// A trackpad reports a fraction of a percent at a time.

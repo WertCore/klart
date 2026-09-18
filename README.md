@@ -128,7 +128,19 @@ gamma row of the table above.
 
 Levels are remembered in `~/Library/Application Support/klart/levels.conf`, keyed
 by display rather than by port, so they survive a reconnect. The file is meant to
-be edited by hand.
+be edited by hand. A key beginning with `:` is a setting rather than a display;
+`:combined` is the only one, and it chooses what the menu's all-displays slider
+does:
+
+```
+:combined = absolute   # the default: every display goes to the level shown
+:combined = relative   # every display moves by the same amount from where it was
+```
+
+`relative` keeps a balance set between two displays. It measures from where they
+were when the menu opened rather than accumulating, so a display that pins at one
+end comes back to where it started instead of quietly losing the difference. The
+menu has a tick for it.
 
 ## In the menu bar
 
