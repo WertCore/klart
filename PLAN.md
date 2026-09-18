@@ -433,8 +433,8 @@ than a `cfg`.
 - [x] The gamma ramp as the fallback
 - [x] Autostart under the `Run` key
 - [x] CI that builds and tests it
+- [x] The laptop panel, through WMI
 - [ ] Run it on a Windows machine
-- [ ] The laptop panel
 
 **Written, compiled and tested by CI. Never run.**
 

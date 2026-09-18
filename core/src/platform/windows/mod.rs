@@ -5,8 +5,8 @@
 //!
 //! - external monitors, through the Monitor Configuration API in `dxva2`, which
 //!   is DDC/CI with the driver doing the framing
-//! - the gamma ramp, for anything that does not answer it
-//! - the laptop panel, which is **not implemented** — see below
+//! - the machine's own panel, through WMI
+//! - the gamma ramp, for anything that answers neither
 //!
 //! Because the driver speaks DDC/CI on this platform's behalf, [`crate::ddc`] is
 //! not used here at all. The protocol that macOS and Linux hand-roll is inside
@@ -15,17 +15,10 @@
 //!
 //! Written against Microsoft's documentation. It has never run: see `PLAN.md`.
 //!
-//! # The laptop panel
-//!
-//! A built-in panel has no DDC/CI, and the documented way to reach it is the WMI
-//! class `WmiMonitorBrightnessMethods` — which means COM, which means several
-//! hundred lines that cannot be checked from here. It is deliberately left out
-//! rather than guessed at, so an internal panel falls through to the gamma ramp
-//! and gets a usable control that is not the right one. `PLAN.md` records it.
-
 mod autostart;
 mod gamma;
 mod monitors;
+mod panel;
 mod physical;
 
 use std::path::PathBuf;
@@ -41,6 +34,7 @@ pub use self::autostart::{set as set_login_item, status as login_item};
 
 use self::gamma::Gamma;
 use self::monitors::Monitor;
+use self::panel::Wmi;
 use self::physical::Physical;
 
 /// Every monitor attached to the machine.
@@ -122,6 +116,21 @@ pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> 
     match Physical::open(monitor.handle, &key) {
         Ok(external) => return Ok((Box::new(external), refusals)),
         Err(refusal) => refusals.push(refusal),
+    }
+
+    // Only ever the panel this display *is*. WMI's brightness applies to a
+    // monitor of its choosing unless told which, so `Wmi::open` matches on the
+    // device instance path — without that, dimming an external monitor would
+    // dim the laptop screen instead.
+    match monitor.instance.as_deref() {
+        Some(instance) => match Wmi::open(instance, &key) {
+            Ok(built_in) => return Ok((Box::new(built_in), refusals)),
+            Err(refusal) => refusals.push(refusal),
+        },
+        None => refusals.push(Error::CannotReach {
+            mechanism: panel::NAME,
+            display: key.clone(),
+        }),
     }
 
     Ok((Box::new(Gamma::open(&monitor.adapter)?), refusals))
