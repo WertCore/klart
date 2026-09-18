@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match control.get() {
             Ok(level) => println!(
                 "  level   {level} via {mechanism}{caveat}",
-                mechanism = control.mechanism(),
+                mechanism = control.mechanism().unwrap_or("nothing"),
                 caveat = if control.persists() {
                     ""
                 } else {
