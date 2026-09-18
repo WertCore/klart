@@ -17,6 +17,7 @@
 //!
 mod autostart;
 mod gamma;
+mod hdr;
 mod monitors;
 mod panel;
 mod physical;
@@ -202,6 +203,19 @@ pub(crate) fn diagnose() -> Result<Vec<Report>> {
                 },
             });
 
+            // Asked of every display rather than only the ones that fail,
+            // because a reader wants to know the display is in HDR whether or
+            // not it turned out to matter.
+            let hdr = monitor.instance.as_deref().and_then(hdr::enabled_for);
+            notes.push(Note {
+                label: "HDR".to_owned(),
+                value: match hdr {
+                    Some(true) => "on".to_owned(),
+                    Some(false) => "off".to_owned(),
+                    None => "could not be read".to_owned(),
+                },
+            });
+
             let verdict = match Physical::open(monitor.handle, display.key().as_str()) {
                 Ok(_) => {
                     attempts.push(Attempt {
@@ -215,15 +229,7 @@ pub(crate) fn diagnose() -> Result<Vec<Report>> {
                         what: "GetMonitorBrightness".to_owned(),
                         outcome: Err(problem.to_string()),
                     });
-                    // Windows gives no way to tell a monitor that declined from
-                    // a link that dropped the request — the driver reports one
-                    // failure for both. macOS can distinguish them because it
-                    // speaks the protocol itself.
-                    if display.kind() == DisplayKind::BuiltIn {
-                        Verdict::NotApplicable
-                    } else {
-                        Verdict::Unclear
-                    }
+                    why_it_failed(display.kind(), hdr)
                 }
             };
 
@@ -238,4 +244,75 @@ pub(crate) fn diagnose() -> Result<Vec<Report>> {
             })
         })
         .collect()
+}
+
+/// What a refused `GetMonitorBrightness` amounts to.
+///
+/// Windows gives no way to tell a monitor that declined from a link that dropped
+/// the request — the driver reports one failure for both, where macOS can
+/// separate them because it speaks the protocol itself. So most of the time the
+/// honest answer is that it is not clear.
+///
+/// HDR is the one case that can be lifted out of that, and it is worth lifting:
+/// it is common, it is not a fault, and what to do about it is none of the
+/// things someone would try on the strength of `Unclear`.
+fn why_it_failed(kind: DisplayKind, hdr: Option<bool>) -> Verdict {
+    if kind == DisplayKind::BuiltIn {
+        return Verdict::NotApplicable;
+    }
+
+    // Only a definite yes. A query that could not be answered says nothing about
+    // whether HDR is on, and naming it as the cause on the strength of silence
+    // would be the same error as ruling it out on the strength of silence.
+    if hdr == Some(true) {
+        Verdict::HdrInTheWay
+    } else {
+        Verdict::Unclear
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_built_in_panel_is_never_blamed_on_hdr() {
+        // It does not use DDC/CI at all, so a refusal from it means nothing —
+        // whatever the colour pipeline is doing.
+        for hdr in [Some(true), Some(false), None] {
+            assert_eq!(
+                why_it_failed(DisplayKind::BuiltIn, hdr),
+                Verdict::NotApplicable,
+                "with hdr = {hdr:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_display_in_hdr_is_told_that_is_why() {
+        assert_eq!(
+            why_it_failed(DisplayKind::External, Some(true)),
+            Verdict::HdrInTheWay
+        );
+    }
+
+    #[test]
+    fn hdr_that_could_not_be_read_is_not_evidence_that_it_is_on() {
+        // The trap this exists for. `None` means the query failed, and treating
+        // it as a yes would send someone to turn off an HDR mode they are not
+        // in, while the real cause went unnamed.
+        assert_eq!(
+            why_it_failed(DisplayKind::External, None),
+            Verdict::Unclear,
+            "an unanswerable HDR query must not become an HDR verdict"
+        );
+    }
+
+    #[test]
+    fn a_display_not_in_hdr_keeps_the_honest_answer() {
+        assert_eq!(
+            why_it_failed(DisplayKind::External, Some(false)),
+            Verdict::Unclear
+        );
+    }
 }
