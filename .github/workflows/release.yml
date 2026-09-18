@@ -183,15 +183,19 @@ jobs:
           Homebrew, which has nothing to undo afterwards:
 
           ```sh
-          brew install wertcore/tap/klart
-          klart autostart on   # the agent holds gamma-dimmed displays
+          brew install wertcore/tap/klart   # no quarantine, nothing to unblock
+          klart autostart on                # the agent holds gamma-dimmed displays
           ```
 
-          **No quarantine step, and no flag to pass for it.** `--no-quarantine`
-          is a cask option; klart is a formula, and Homebrew's formula downloader
-          does not set the attribute at all. Quarantine is applied by browsers
-          and LaunchServices, which is why the archive below needs clearing and
-          this does not.
+          **Nothing to clear, and no flag to pass for it.** Homebrew's formula
+          downloader does not set the quarantine attribute, so there is nothing
+          to undo. It is applied by browsers and LaunchServices, which is why the
+          archive below needs clearing and this does not.
+
+          If you went looking for `--no-quarantine`: it was a *cask* option, it
+          was deprecated in October 2025 and the last of it was removed from
+          Homebrew in July 2026. Passing it to Homebrew 7 is `Error: invalid
+          option`, whichever kind of package it is aimed at.
 
           ### Or the archive
 
