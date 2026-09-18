@@ -18,8 +18,6 @@
 //! whichever instance WMI happens to list first. Without that, dimming an
 //! external monitor would dim the laptop screen.
 
-use std::sync::OnceLock;
-
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
     CoSetProxyBlanket, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
@@ -45,6 +43,16 @@ pub(crate) const NAME: &str = "WMI";
 const TIMEOUT: u32 = 0;
 
 /// The panel, and the WMI connection that reaches it.
+///
+/// The connection is held here rather than in a `static`, and that is not a
+/// style choice. `CoInitializeEx` initialises COM for *one thread*; a proxy left
+/// in a `static` outlives the apartment of whatever thread created it, and using
+/// or tearing it down afterwards is an access violation. Which is exactly what
+/// happened — the Windows test run crashed at exit with `0xc0000005` after every
+/// test had passed.
+///
+/// So this type is deliberately neither `Send` nor `Sync`. It belongs to the
+/// thread that opened it, which is what COM actually promises.
 pub(crate) struct Wmi {
     services: IWbemServices,
     /// The `InstanceName` this backend is bound to.
@@ -66,7 +74,7 @@ impl Wmi {
             display: display.to_owned(),
         };
 
-        let services = connect().ok_or_else(cannot_reach)?.clone();
+        let services = connect().ok_or_else(cannot_reach)?;
 
         // WMI's instance name is the device instance path with a suffix, so the
         // match is on the prefix. Comparison is case-insensitive because the
@@ -181,37 +189,20 @@ impl Backend for Wmi {
     }
 }
 
-/// The `root\WMI` namespace, connected once per process.
+/// Connects to the `root\WMI` namespace on the calling thread.
 ///
-/// Held for the life of the process rather than opened per call: connecting is
-/// several round trips through COM, and a slider asks for brightness many times
-/// a second.
-fn connect() -> Option<&'static IWbemServices> {
-    static SERVICES: OnceLock<Option<Connection>> = OnceLock::new();
-    SERVICES.get_or_init(open_namespace).as_ref().map(|c| &c.0)
-}
-
-/// A wrapper so the connection can be held in a `static`.
-///
-/// `IWbemServices` is a COM pointer, which is reference counted rather than
-/// thread-bound; the proxy is configured below to be callable from any thread.
-struct Connection(IWbemServices);
-
-// SAFETY: the interface is a multi-threaded-apartment proxy — COM is
-// initialised with `COINIT_MULTITHREADED` and the blanket is set below — so
-// calls from any thread are marshalled rather than rejected.
-unsafe impl Send for Connection {}
-unsafe impl Sync for Connection {}
-
-fn open_namespace() -> Option<Connection> {
+/// Once per [`Wmi`] rather than once per process, for the reason on that type.
+/// Connecting is several round trips through COM, which is why `get` and `set`
+/// reuse this rather than reconnecting — but the reuse stops at the object.
+fn connect() -> Option<IWbemServices> {
     // SAFETY: each call's arguments are live, and each pointer came from the
-    // call before it. COM is never uninitialised: the connection above lives as
-    // long as the process, and tearing it down at exit buys nothing.
+    // call before it.
     unsafe {
         // `S_FALSE` means this thread was already initialised, which is success
-        // for the purpose here. Only a genuine failure is worth stopping for.
-        let initialised = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if initialised.is_err() {
+        // for the purpose here. COM is not uninitialised on the way out: the
+        // proxy below is still held, and releasing the apartment underneath it
+        // is the very fault this arrangement exists to avoid.
+        if CoInitializeEx(None, COINIT_MULTITHREADED).is_err() {
             return None;
         }
 
@@ -244,7 +235,7 @@ fn open_namespace() -> Option<Connection> {
         )
         .ok()?;
 
-        Some(Connection(services))
+        Some(services)
     }
 }
 
