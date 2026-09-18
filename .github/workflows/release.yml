@@ -204,12 +204,20 @@ jobs:
           ### Or the archive
 
           Unzip and move `Klart.app` to `/Applications`. It is **not signed or
-          notarised**, and a browser put it there, so the first launch is refused
-          — right-click it and choose Open, or:
+          notarised**, and a browser put it there, so the first launch is
+          refused. Either clear the attribute the browser set:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/Klart.app
           ```
+
+          or open it once, then approve it in System Settings → Privacy &
+          Security, where macOS will be offering an **Open Anyway** button.
+          Right-click and Open used to do this and no longer does: Apple removed
+          that bypass for unsigned applications in macOS 15.
+
+          Neither step exists on the Homebrew path above, which is the argument
+          for taking it.
 
           The command line rides along inside the bundle:
 
