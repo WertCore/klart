@@ -39,6 +39,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSStatusBarButton",
     "NSStatusItem",
     "NSView",
+    # `NSWorkspace` is where the sleep and wake notifications are posted.
+    "NSWorkspace",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
@@ -46,6 +48,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSDate",
     "NSError",
     "NSGeometry",
+    # `NSNotificationCenter` and `NSNotificationName`, for the wake observer.
+    "NSNotification",
     "NSRunLoop",
     "NSString",
 ] }

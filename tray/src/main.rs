@@ -24,6 +24,7 @@ mod driver;
 mod menu;
 mod request;
 mod status;
+mod wake;
 
 use std::ffi::c_void;
 use std::process::ExitCode;
@@ -77,6 +78,11 @@ fn main() -> ExitCode {
 
     watch_for_display_changes();
 
+    // Held for as long as the agent runs: `NSNotificationCenter` does not retain
+    // what it sends to, so this binding is what keeps the next wake from
+    // arriving at a freed object.
+    let _woken = wake::watch(mtm);
+
     // The status item exists by now, which is why `finishLaunching` is called by
     // hand rather than letting `run` do it: `run` never returns, and the pump
     // below has to be the thing draining the request queue.
@@ -89,6 +95,10 @@ fn main() -> ExitCode {
         // levels it left behind.
         agent.driver.flush();
         agent.driver.persist();
+
+        // A display that has just woken may not answer for a second or two, so
+        // this is a few attempts spread over the passes rather than one write.
+        agent.driver.drive_restore();
 
         for asked in request::drain() {
             match asked {
@@ -107,6 +117,13 @@ fn main() -> ExitCode {
 
         if DISPLAYS_CHANGED.swap(false, Ordering::Relaxed) {
             agent.look_again(mtm);
+        }
+
+        // After the display check, not before: waking with the lid opened onto a
+        // different set of monitors fires both, and `look_again` replaces the
+        // displays a restore would have been counted against.
+        if wake::happened() {
+            agent.driver.restore_after_wake();
         }
     }
 }
