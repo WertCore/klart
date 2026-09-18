@@ -131,6 +131,12 @@ pub(crate) struct DisplayNode {
     /// has one and it answers nothing, and a display behind an adaptor that does
     /// not carry DDC may have none at all.
     pub av_service: Option<IoRef>,
+    /// What the link is made of, such as `DP -> HDMI`.
+    ///
+    /// An upstream that differs from the downstream means a protocol conversion
+    /// is happening somewhere in the cable or adaptor, which is where I2C tends
+    /// to get dropped while the picture passes fine.
+    pub transport: Option<String>,
 }
 
 /// Walks the IOService plane and pairs every panel with its I2C service.
@@ -182,6 +188,7 @@ pub(crate) fn display_nodes() -> Vec<DisplayNode> {
                     found.push(DisplayNode {
                         attributes,
                         av_service: None,
+                        transport: read_transport(&entry),
                     });
                 }
             }
@@ -192,6 +199,12 @@ pub(crate) fn display_nodes() -> Vec<DisplayNode> {
                 if let Some(panel) = found.last_mut()
                     && panel.av_service.is_none()
                 {
+                    // The transport is published on whichever of the two nodes
+                    // the platform felt like putting it on, so it is looked for
+                    // on both.
+                    if panel.transport.is_none() {
+                        panel.transport = read_transport(&entry);
+                    }
                     panel.av_service = Some(entry);
                 }
             }
@@ -245,6 +258,25 @@ fn class_of(entry: &IoRef) -> Option<String> {
     // SAFETY: `IOObjectGetClass` NUL-terminates within the buffer on success.
     let name = unsafe { CStr::from_ptr(name.as_ptr()) };
     name.to_str().ok().map(str::to_owned)
+}
+
+/// Reads a node's `Transport`, which is an upstream and a downstream protocol.
+fn read_transport(entry: &IoRef) -> Option<String> {
+    let key = CFString::from_static_str("Transport");
+
+    // SAFETY: `entry` is live and `key` outlives the call. The result is a +1
+    // reference, which `CFRetained::from_raw` takes over.
+    let raw = unsafe { IORegistryEntryCreateCFProperty(entry.raw(), &key, null(), 0) };
+    let transport = NonNull::new(raw)?;
+    // SAFETY: non-null and owning a reference.
+    let transport = unsafe { CFRetained::from_raw(transport) };
+    let transport = transport.downcast_ref::<CFDictionary>()?;
+
+    let upstream = string(transport, "Upstream")?;
+    match string(transport, "Downstream") {
+        Some(downstream) if downstream != upstream => Some(format!("{upstream} -> {downstream}")),
+        _ => Some(upstream),
+    }
 }
 
 /// Pulls `DisplayAttributes` → `ProductAttributes` off one registry node.
@@ -319,6 +351,7 @@ mod tests {
         DisplayNode {
             attributes,
             av_service: None,
+            transport: None,
         }
     }
 

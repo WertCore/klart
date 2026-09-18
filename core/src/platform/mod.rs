@@ -22,7 +22,7 @@
 mod macos;
 
 #[cfg(target_os = "macos")]
-pub(crate) use macos::{config_directory, displays, open};
+pub(crate) use macos::{config_directory, diagnose, displays, open};
 
 // A build for another target would link and silently do nothing, which is worse
 // than not building. The seam above is what a port plugs into.

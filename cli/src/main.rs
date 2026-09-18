@@ -61,6 +61,8 @@ enum Command {
         #[command(flatten)]
         output: Output,
     },
+    /// Work out why a display will not answer, and what to do about it.
+    Probe,
     /// Put every display back to the level klart last saw it at.
     Restore {
         #[command(flatten)]
@@ -139,6 +141,13 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // Probing does not need a mechanism to have been resolved — the whole point
+    // is the displays where none could be.
+    if matches!(cli.command, Command::Probe) {
+        render::probe(&klart_core::diagnose()?);
+        return Ok(());
+    }
+
     let found = controls()?;
 
     // `list` on a machine with nothing attached is an answer, not a failure —
@@ -168,6 +177,9 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Set { target, output, .. }
         | Command::Up { target, output, .. }
         | Command::Down { target, output, .. } => (target, output),
+
+        // Returned above, before any of this.
+        Command::Probe => unreachable!("probing returns before a target is needed"),
     };
 
     let chosen = select::resolve(&candidates(&found), &target.selection())?;
@@ -176,7 +188,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     for &index in &chosen {
         let control = &found[index];
         match &cli.command {
-            Command::List { .. } | Command::Get { .. } => continue,
+            Command::List { .. } | Command::Get { .. } | Command::Probe => continue,
             Command::Set { percent, .. } => {
                 control.set(Brightness::from_percent(percent.0))?;
             }

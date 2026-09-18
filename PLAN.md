@@ -45,8 +45,25 @@ same channel succeeds. Five framings were tried (chip `0x37` and `0x6e`, offsets
 `0x51`, `0x00` and `0x6e`, with and without the host address in the buffer) and
 all five failed identically, which is what rules the encoding out as the cause.
 
-Verifying these needs a display on DisplayPort or USB-C alt mode without an HDMI
-conversion in the path.
+What the write is refused with has since been decoded: `0xe0114102` is
+`sub_iokit_audio_video` (IOKit's `err_sub(0x45)`) with the family's own code 258.
+So it is the display coprocessor's own refusal, not a generic `kIOReturnUnsupported`
+— the request reached the AV family and that family said no.
+
+Independent reverse engineering corroborates the framing. Asahi Linux implements
+DDC/CI through the same DCP firmware service macOS uses, as commands 9 and 10 on
+`dcpav-service-epic`, with the first byte of a write carried as the firmware's
+data-address parameter and settle delays of 10 ms after a write and 40 ms before
+a read. That is byte for byte what `crate::ddc` does. It also settles that there
+is no lower-level route: "the DCP firmware owns the DisplayPort AUX channel, so
+the AP cannot run I2C-over-AUX itself". Nothing in user space gets underneath it.
+
+Which leaves two candidate causes, and entry 13 exists to tell them apart:
+
+1. the monitor has DDC/CI switched off in its own menu, which is how many ship
+2. the cable converts DisplayPort to HDMI inside itself and does not carry I2C
+
+Verifying entry 4 needs whichever of those turns out to be true to be fixed.
 
 ## 5. The gamma fallback, and choosing between the three
 
@@ -202,3 +219,48 @@ been run is worse than shipping one architecture and saying so.
 Not signed and not notarised, which means the first launch is refused and the
 release notes have to say how to get past it. Signing needs a paid Developer ID;
 that is a decision about money rather than about code.
+
+## 12. Dim past where the backlight stops
+
+- [x] Compose the backlight with the gamma ramp instead of choosing between them
+- [x] Hold the seam continuous, so nothing jumps as it is crossed
+
+A backlight has a minimum and on a laptop panel in a dark room that minimum is
+still too bright. Below it the ramp is the only thing left. So the bottom quarter
+of the range holds the backlight at its floor and dims with the ramp, and
+everything above it drives the backlight and leaves the ramp alone.
+
+Both mature macOS tools treat this as a headline feature, which is what put it
+first on the list in the parity work.
+
+The composition is platform-free: it takes two `Backend`s and does not care which,
+so a Windows port gets it for nothing.
+
+One consequence worth knowing: below the seam part of the level lives in a ramp
+macOS discards when the process exits, so `Backend::persists` became a question
+about *where the level currently is* rather than about the mechanism. It is
+answered from a cached value, because a menu asks it on every draw and a DDC/CI
+read costs the better part of a tenth of a second.
+
+## 13. Say why a display will not answer
+
+- [x] `klart probe`: what was tried, what came back, and what it means
+- [x] Decode `IOReturn` into its subsystem, which is where the meaning is
+- [ ] Run it against a display that refuses DDC/CI
+
+Every tool in this space reports the same thing when DDC/CI fails: that it
+failed. That is the least useful true statement available, because the ordinary
+causes want different responses — turn a setting on, change a cable, or accept
+the software fallback.
+
+The question that separates them is whether the link carries I2C at all. A
+display's EDID sits on the same two wires at a different address and is always
+present, because the machine could not be drawing a picture otherwise. So reading
+the EDID back over I2C is the control in the experiment:
+
+- EDID reads, DDC/CI refused → the wires are fine and the monitor is declining.
+  Look for DDC/CI in its on-screen menu; most ship with it off.
+- EDID does not read → something in the cable, adaptor or dock is not passing
+  I2C, and no amount of framing will change that.
+
+The last box needs the external display back to be ticked.

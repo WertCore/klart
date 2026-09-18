@@ -68,9 +68,9 @@ pub fn warn_about_anything_that_will_not_last(controls: &[&Control]) {
     for control in controls {
         if !control.persists() {
             eprintln!(
-                "klart: {} has no hardware brightness control, so it was dimmed with its gamma \
-                 ramp — and macOS puts that back as this command exits. The change is already \
-                 gone. Only a process that keeps running can hold it.",
+                "klart: part of {}'s level is being held by its gamma ramp, which macOS puts \
+                 back as this command exits — so the change is already gone. Only a process \
+                 that keeps running can hold it; `klart-tray` is that process.",
                 control.display().name()
             );
         }
@@ -157,4 +157,61 @@ impl Row {
             refusals: control.refusals().iter().map(ToString::to_string).collect(),
         }
     }
+}
+
+/// What `probe` prints.
+///
+/// Laid out as evidence and then a conclusion, rather than the other way round,
+/// because the conclusion is a guess built from the evidence and a reader who
+/// disagrees with it needs to be able to see why.
+pub fn probe(reports: &[klart_core::Report]) {
+    if reports.is_empty() {
+        println!("no displays are attached");
+        return;
+    }
+
+    for (index, report) in reports.iter().enumerate() {
+        if index > 0 {
+            println!();
+        }
+
+        println!("{} ({})", report.display, report.key);
+
+        for note in &report.notes {
+            println!("  {:<16} {}", note.label, note.value);
+        }
+
+        for attempt in &report.attempts {
+            match &attempt.outcome {
+                Ok(summary) => println!("  ok               {}: {summary}", attempt.what),
+                Err(problem) => println!("  failed           {}: {problem}", attempt.what),
+            }
+        }
+
+        println!();
+        println!("  {:?}", report.verdict);
+        for line in wrap(report.verdict.advice(), 72) {
+            println!("  {line}");
+        }
+    }
+}
+
+/// Breaks a paragraph so a terminal does not have to.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.len() + 1 + word.len() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
