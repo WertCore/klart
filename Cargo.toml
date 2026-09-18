@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
-# `tray` joins once there is something for it to drive; see PLAN.md.
-members = ["core", "cli"]
+members = ["core", "cli", "tray"]
 
 [workspace.package]
 version = "0.0.0"

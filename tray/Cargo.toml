@@ -1,0 +1,52 @@
+[package]
+name = "klart-tray"
+description = "Menu bar agent for klart"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "klart-tray"
+path = "src/main.rs"
+
+[dependencies]
+klart-core.workspace = true
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    # `statusItemWithLength` takes a `CGFloat` and `NSRect` comes from the same
+    # place, so the geometry types have to come with it.
+    "objc2-core-foundation",
+    "NSApplication",
+    "NSButton",
+    "NSCell",
+    "NSControl",
+    "NSEvent",
+    "NSMenu",
+    "NSMenuItem",
+    "NSImage",
+    "NSResponder",
+    # `NSApplicationActivationPolicy` lives with the running-application types.
+    "NSRunningApplication",
+    "NSSlider",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSDate",
+    "NSGeometry",
+    "NSRunLoop",
+    "NSString",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
+    "CGDirectDisplay",
+    "CGDisplayConfiguration",
+    "CGError",
+] }
