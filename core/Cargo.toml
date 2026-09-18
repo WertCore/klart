@@ -14,6 +14,7 @@ authors.workspace = true
 # are declared in `sys::ioreg` instead.
 [dependencies]
 libc = "0.2.189"
+objc2 = { version = "0.6.4", default-features = false }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
     "CFBase",
@@ -30,4 +31,13 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
     # `CGDisplayIsBuiltin` and `CGDisplayIsMain` return `libc::boolean_t`, so the
     # binding for them only exists with this on.
     "libc",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSBundle", "NSError", "NSString"] }
+# `SMAppService` is an Objective-C class, so the objc2 runtime and Foundation
+# come with it; without those features the binding is not generated at all.
+objc2-service-management = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "SMAppService",
+    "objc2",
+    "objc2-foundation",
 ] }

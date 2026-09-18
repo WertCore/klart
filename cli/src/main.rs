@@ -6,7 +6,7 @@ mod select;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
-use klart_core::{Brightness, Control, Remembered, controls};
+use klart_core::{Brightness, Control, LoginItem, Remembered, controls};
 
 use crate::select::{Candidate, Selection};
 
@@ -63,6 +63,16 @@ enum Command {
     },
     /// Work out why a display will not answer, and what to do about it.
     Probe,
+    /// Show or change whether the menu bar agent starts with the session.
+    ///
+    /// Worth setting: on a display with no hardware brightness control the level
+    /// lasts only as long as the agent runs, so without this such a display is
+    /// back at full brightness after every restart.
+    Autostart {
+        /// `on` or `off`. Omit to print the current setting.
+        #[arg(value_name = "on|off")]
+        wanted: Option<Switch>,
+    },
     /// Put every display back to the level klart last saw it at.
     Restore {
         #[command(flatten)]
@@ -110,6 +120,22 @@ struct Output {
     json: bool,
 }
 
+/// A plain on or off.
+#[derive(Clone, Copy)]
+struct Switch(bool);
+
+impl std::str::FromStr for Switch {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "on" | "true" | "yes" | "enable" | "enabled" => Ok(Self(true)),
+            "off" | "false" | "no" | "disable" | "disabled" => Ok(Self(false)),
+            other => Err(format!("{other:?} is not `on` or `off`")),
+        }
+    }
+}
+
 /// A percentage, accepted with or without a trailing sign.
 #[derive(Clone, Copy)]
 struct Percent(f32);
@@ -143,6 +169,15 @@ fn main() -> ExitCode {
 fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Probing does not need a mechanism to have been resolved — the whole point
     // is the displays where none could be.
+    if let Command::Autostart { wanted } = &cli.command {
+        let state = match wanted {
+            Some(Switch(wanted)) => klart_core::set_login_item(*wanted)?,
+            None => klart_core::login_item(),
+        };
+        println!("{}", describe_autostart(state));
+        return Ok(());
+    }
+
     if matches!(cli.command, Command::Probe) {
         render::probe(&klart_core::diagnose()?);
         return Ok(());
@@ -178,8 +213,10 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Up { target, output, .. }
         | Command::Down { target, output, .. } => (target, output),
 
-        // Returned above, before any of this.
-        Command::Probe => unreachable!("probing returns before a target is needed"),
+        // Both return above, before any of this.
+        Command::Probe | Command::Autostart { .. } => {
+            unreachable!("these return before a target is needed")
+        }
     };
 
     let chosen = select::resolve(&candidates(&found), &target.selection())?;
@@ -188,7 +225,12 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     for &index in &chosen {
         let control = &found[index];
         match &cli.command {
-            Command::List { .. } | Command::Get { .. } | Command::Probe => continue,
+            Command::List { .. }
+            | Command::Get { .. }
+            | Command::Probe
+            | Command::Autostart { .. } => {
+                continue;
+            }
             Command::Set { percent, .. } => {
                 control.set(Brightness::from_percent(percent.0))?;
             }
@@ -248,4 +290,19 @@ fn candidates(found: &[Control]) -> Vec<Candidate> {
             is_main: control.display().is_main(),
         })
         .collect()
+}
+
+/// What to say about the login item.
+fn describe_autostart(state: LoginItem) -> &'static str {
+    match state {
+        LoginItem::Enabled => "on",
+        LoginItem::Disabled => "off",
+        LoginItem::AwaitingApproval => {
+            "registered, waiting to be allowed in System Settings under General, Login Items"
+        }
+        LoginItem::Unavailable => {
+            "unavailable — this is not running from the app bundle. Build it with \
+             `scripts/bundle.sh` and run `Klart.app/Contents/MacOS/klart` instead."
+        }
+    }
 }

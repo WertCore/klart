@@ -79,6 +79,14 @@ fn main() -> ExitCode {
             match asked {
                 Request::Quit => return ExitCode::SUCCESS,
                 Request::Refresh => agent.look_again(mtm),
+                Request::SetLoginItem(wanted) => {
+                    if let Err(problem) = klart_core::set_login_item(wanted) {
+                        eprintln!("klart-tray: {problem}");
+                    }
+                    // Rebuilt either way: the row shows what the system says,
+                    // not what was asked for.
+                    agent.redraw(mtm);
+                }
             }
         }
 
@@ -169,6 +177,12 @@ impl Agent {
         item.setMenu(Some(&menu.menu));
 
         Self { item, driver, menu }
+    }
+
+    /// Rebuilds the menu without re-enumerating.
+    fn redraw(&mut self, mtm: MainThreadMarker) {
+        self.menu = menu::build(mtm, &self.driver);
+        self.item.setMenu(Some(&self.menu.menu));
     }
 
     /// Enumerates again, for when the displays have changed under it.
