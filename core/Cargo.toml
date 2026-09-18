@@ -49,3 +49,6 @@ objc2-service-management = { version = "0.3.2", default-features = false, featur
     "objc2",
     "objc2-foundation",
 ] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Devices_Display", "Win32_System_Registry", "Win32_UI_ColorSystem", "Win32_UI_WindowsAndMessaging"] }

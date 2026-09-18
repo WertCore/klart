@@ -8,9 +8,12 @@ to its own on-screen buttons. `klart` puts all of them on one control.
 
 ## Ports
 
-macOS today. The core is arranged so that adding another is a matter of
-implementing `platform::displays` and `platform::open`: `Brightness`, the display
-keys, the DDC/CI protocol and the whole command line are platform-free already.
+macOS runs and is tested on real hardware. Linux and Windows are written,
+compiled and tested by CI on their own runners, and have never been run — the
+boxes that need a machine are unticked in [`PLAN.md`](PLAN.md).
+
+The menu bar agent is macOS only. A tray elsewhere is StatusNotifierItem over
+D-Bus or `Shell_NotifyIcon`, which is a new crate rather than a `cfg`.
 
 `DisplayKey` is portable by contract — its derivation is seven numbered rules,
 each with a test, over EDID fields every operating system can read. A
