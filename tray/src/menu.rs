@@ -33,6 +33,10 @@ const ROW: NSSize = NSSize {
     height: 26.0,
 };
 
+/// The tag the combined slider carries. It drives every display, so it names
+/// none of them.
+const ALL_DISPLAYS: usize = 0;
+
 /// Indented to sit under the heading's text rather than its left margin.
 const TRACK: NSRect = NSRect {
     origin: NSPoint { x: 20.0, y: 3.0 },
@@ -47,6 +51,8 @@ const TRACK: NSRect = NSRect {
 /// Only the headings. Everything else a click needs — which display, what level
 /// — is carried on the slider itself.
 pub struct MenuState {
+    /// The heading above the combined slider, when there is one.
+    all: Option<Retained<NSMenuItem>>,
     items: Vec<Retained<NSMenuItem>>,
     names: Vec<String>,
     transient: Vec<bool>,
@@ -89,6 +95,28 @@ define_class!(
             // Rebuilding the menu would end the drag, so the heading is
             // relabelled in place.
             self.relabel(display, percent);
+        }
+
+        /// Sent continuously while the combined slider is dragged.
+        #[unsafe(method(allDisplaysChanged:))]
+        fn all_displays_changed(&self, sender: &NSSlider) {
+            let percent = request::percent_from(sender.doubleValue());
+            let state = self.ivars();
+
+            state.driver.request_all(percent);
+
+            if let Some(heading) = state.all.as_ref() {
+                heading.setTitle(&NSString::from_str(&request::heading(
+                    "All displays",
+                    percent,
+                    false,
+                )));
+            }
+            // The per-display headings are stale the moment this moves, and the
+            // menu cannot be rebuilt under a drag without ending it.
+            for display in 0..state.items.len() {
+                self.relabel(display, percent);
+            }
         }
 
         #[unsafe(method(toggleLoginItem:))]
@@ -161,7 +189,16 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
     let menu = NSMenu::new(mtm);
     let controls = driver.controls();
 
+    // Only worth the space when there is more than one thing to combine.
+    let combined = (controls.len() > 1).then(|| {
+        label(
+            mtm,
+            &request::heading("All displays", driver.average(), false),
+        )
+    });
+
     let mut state = MenuState {
+        all: combined.clone(),
         items: Vec::with_capacity(controls.len()),
         names: Vec::with_capacity(controls.len()),
         transient: Vec::with_capacity(controls.len()),
@@ -187,6 +224,18 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         menu.addItem(&label(mtm, "No displays found"));
     }
 
+    if let Some(heading) = combined {
+        menu.addItem(&heading);
+        menu.addItem(&slider_row(
+            mtm,
+            &controller,
+            ALL_DISPLAYS,
+            driver.average(),
+            sel!(allDisplaysChanged:),
+        ));
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+    }
+
     for (display, control) in controls.iter().enumerate() {
         if display > 0 {
             menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -196,7 +245,13 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         menu.addItem(&heading);
 
         let percent = control.get().map_or(0, |level| level.percent_rounded());
-        menu.addItem(&slider_row(mtm, &controller, display, percent));
+        menu.addItem(&slider_row(
+            mtm,
+            &controller,
+            display,
+            percent,
+            sel!(brightnessChanged:),
+        ));
 
         if !control.persists() {
             menu.addItem(&label(mtm, "· held only while klart runs"));
@@ -274,6 +329,7 @@ fn slider_row(
     controller: &Controller,
     display: usize,
     percent: u8,
+    action: Sel,
 ) -> Retained<NSMenuItem> {
     let row = NSRect {
         origin: NSPoint { x: 0.0, y: 0.0 },
@@ -296,7 +352,7 @@ fn slider_row(
     unsafe {
         slider.setTag(isize::try_from(display).unwrap_or(0));
         slider.setTarget(Some(controller));
-        slider.setAction(Some(sel!(brightnessChanged:)));
+        slider.setAction(Some(action));
     }
 
     container.addSubview(&slider);

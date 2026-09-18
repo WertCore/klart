@@ -26,6 +26,8 @@ pub struct Driver {
     last_written: RefCell<Vec<Instant>>,
     /// The level each display was last left at, across runs.
     remembered: RefCell<Remembered>,
+    /// A value for every display that arrived too soon after the last write.
+    pending_all: Cell<Option<u8>>,
     /// A value that arrived too soon after the last write.
     ///
     /// Held rather than dropped because the value most likely to fall inside the
@@ -41,6 +43,7 @@ impl Driver {
             controls: RefCell::new(controls),
             last_written: RefCell::new(last_written),
             remembered: RefCell::new(Remembered::load()),
+            pending_all: Cell::new(None),
             pending: Cell::new(None),
         }
     }
@@ -55,6 +58,7 @@ impl Driver {
         *self.last_written.borrow_mut() = vec![far_enough_back(); controls.len()];
         *self.controls.borrow_mut() = controls;
         self.pending.set(None);
+        self.pending_all.set(None);
     }
 
     /// Puts back the levels of displays that could not keep their own.
@@ -103,6 +107,53 @@ impl Driver {
         }
     }
 
+    /// Asks for a level on every display at once.
+    ///
+    /// Absolute rather than relative: every display goes to the level asked for,
+    /// rather than each moving by the same amount from where it was. Moving them
+    /// by a delta would preserve whatever balance had been set between them,
+    /// which is the nicer property right up until one of them saturates and the
+    /// balance is silently lost anyway. Setting them all is predictable at every
+    /// point in the range, and predictable wins in a control someone drags.
+    pub fn request_all(&self, percent: u8) {
+        let count = self.controls.borrow().len();
+
+        // Every display, not up to the first that is rate limited: `all` and
+        // `any` both short circuit, which would leave the rest unwritten.
+        let mut landed = true;
+        for display in 0..count {
+            landed &= self.write(display, percent);
+        }
+
+        // Held as one value rather than per display: the last position of a drag
+        // is the one that was chosen, and it is the same for all of them.
+        if !landed {
+            self.pending_all.set(Some(percent));
+        }
+    }
+
+    /// The level to start a combined control at.
+    ///
+    /// The mean of what the displays are at. Any single display's level would be
+    /// an arbitrary choice, and a fixed position would jump the moment it was
+    /// touched.
+    pub fn average(&self) -> u8 {
+        let controls = self.controls.borrow();
+        let levels: Vec<u16> = controls
+            .iter()
+            .filter_map(|control| control.get().ok())
+            .map(|level| u16::from(level.percent_rounded()))
+            .collect();
+
+        if levels.is_empty() {
+            return 0;
+        }
+        // `u16` and integer division: the sum of eight percentages cannot
+        // overflow it, and the result is a percentage either way.
+        u8::try_from(levels.iter().sum::<u16>() / u16::try_from(levels.len()).unwrap_or(1))
+            .unwrap_or(100)
+    }
+
     /// Lands whatever was held back, once its display will take it.
     ///
     /// Called from the pump, which in practice means the moment the menu closes.
@@ -111,6 +162,20 @@ impl Driver {
             && self.write(display, percent)
         {
             self.pending.set(None);
+        }
+
+        if let Some(percent) = self.pending_all.get() {
+            let count = self.controls.borrow().len();
+
+            // Same reason as `request_all`: short circuiting here would land the
+            // held value on one display and drop it for the others.
+            let mut landed = true;
+            for display in 0..count {
+                landed &= self.write(display, percent);
+            }
+            if landed {
+                self.pending_all.set(None);
+            }
         }
     }
 
