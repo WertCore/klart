@@ -5,7 +5,7 @@
 //! platform, because DDC/CI is the same everywhere and only the transport is
 //! not.
 
-use crate::ddc::{CHIP_ADDRESS, DATA_ADDRESS, Link, NAME};
+use crate::ddc::{CHIP_ADDRESS, HOST_ADDRESS, Link, NAME};
 use crate::display::Display;
 use crate::error::{Error, Result};
 
@@ -55,10 +55,12 @@ impl AvLink {
 
 impl Link for AvLink {
     fn write(&self, bytes: &[u8]) -> std::result::Result<(), i32> {
-        self.service.write(CHIP_ADDRESS, DATA_ADDRESS, bytes)
+        self.service
+            .write(CHIP_ADDRESS, u32::from(HOST_ADDRESS), bytes)
     }
 
     fn read(&self, into: &mut [u8]) -> std::result::Result<(), i32> {
-        self.service.read(CHIP_ADDRESS, DATA_ADDRESS, into)
+        self.service
+            .read(CHIP_ADDRESS, u32::from(HOST_ADDRESS), into)
     }
 }

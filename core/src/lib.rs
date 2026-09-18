@@ -22,6 +22,14 @@
 mod autostart;
 mod backend;
 mod brightness;
+// Composes a backlight with a software fallback, so only a platform that has
+// both reaches for it. macOS does; Linux has no gamma ramp without a display
+// server, so nothing there constructs one. The logic and its tests are
+// platform-free and stay in the build on every target.
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(dead_code, reason = "no software fallback on this platform yet")
+)]
 mod combined;
 mod control;
 mod ddc;

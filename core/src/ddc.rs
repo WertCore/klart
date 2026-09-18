@@ -31,20 +31,19 @@ pub(crate) const NAME: &str = "DDC/CI";
 /// interpret.
 pub(crate) const CHIP_ADDRESS: u32 = 0x37;
 
-/// The offset every DDC/CI message is written at and read from.
-pub(crate) const DATA_ADDRESS: u32 = 0x51;
-
 /// The monitor's address on the bus, in the eight-bit form the checksum covers.
 ///
 /// Not carried in the buffer — a [`Link`] supplies it — but the monitor still
 /// folds it into the checksum, so it has to be folded in here.
 const DISPLAY_ADDRESS: u8 = 0x6e;
 
-/// The host's address, likewise.
+/// The host's address, likewise — and the register a DDC/CI message is written
+/// at, which is the same byte for the same reason.
 ///
-/// Public within the crate because a transport that cannot carry it out of band
-/// — a raw I2C write on Linux, as against macOS's interface, which takes it as
-/// an argument — has to put it on the wire itself.
+/// Public within the crate because the two transports carry it differently.
+/// macOS's interface takes it as an argument and puts it on the wire itself; a
+/// raw I2C write on Linux has nowhere to put it but the front of the payload.
+/// They produce the same bytes on the bus.
 pub(crate) const HOST_ADDRESS: u8 = 0x51;
 
 /// The host's *receive* address, which is what a reply's checksum is seeded
