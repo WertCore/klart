@@ -5,6 +5,21 @@
 //! the process that set it exits — to be the thing that stays running so a
 //! display with no hardware brightness control can stay dim.
 
+// The agent is AppKit throughout — a status item, a menu, an `NSSlider` inside
+// an `NSMenuItem` — and none of that has an equivalent to `cfg` its way onto
+// another platform. A tray on Linux is StatusNotifierItem over D-Bus or the
+// legacy XEmbed protocol depending on the desktop; on Windows it is
+// `Shell_NotifyIcon` with an owner-drawn menu. Each is a rewrite of this crate
+// rather than a port of it.
+//
+// `klart-core` and the command line are portable and build on all three. This
+// says so rather than producing a page of unresolved AppKit imports.
+#[cfg(not(target_os = "macos"))]
+compile_error!(
+    "klart-tray is AppKit and macOS only. `klart-core` and `klart-cli` build \
+     everywhere; a tray for this platform is a new crate, not a cfg"
+);
+
 mod driver;
 mod menu;
 mod request;

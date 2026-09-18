@@ -10,9 +10,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    # macOS only, and deliberately so: `core` refuses to compile anywhere else
-    # rather than building into a no-op, so there is no second platform to check.
+  macos:
     name: macOS (arm64)
     runs-on: macos-latest
     steps:
@@ -38,29 +36,63 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-      # The portability seam is a claim until something checks it. A build for
-      # another platform has to stop at `platform`'s own `compile_error!`, which
-      # names the functions a port implements. If it stops inside a dependency
-      # instead, an Apple-only crate has escaped its target table and the seam
-      # has quietly stopped being real — which nobody would find out until
-      # somebody started a port.
-      - name: The seam holds for other platforms
+      # The seam is a claim until something checks it. A target with no platform
+      # module has to stop at `platform`'s own `compile_error!`, which names the
+      # functions a port implements. If it stops inside a dependency instead, an
+      # Apple-only crate has escaped its target table and the seam has quietly
+      # stopped being real — which nobody would find out until somebody started
+      # a port.
+      #
+      # Targets that *do* have a module get a job of their own below, which
+      # builds and tests them properly rather than checking that they fail.
+      - name: The seam holds for targets with no module
         shell: bash
         run: |
           set -uo pipefail
-          for target in x86_64-pc-windows-msvc x86_64-unknown-linux-gnu; do
-            rustup target add "$target"
+          target=x86_64-pc-windows-msvc
+          rustup target add "$target"
 
-            if output=$(cargo check --target "$target" --workspace 2>&1); then
-              echo "::error::$target compiled. If a platform module for it now exists, this check needs updating."
-              exit 1
-            fi
+          if output=$(cargo check --target "$target" -p klart-core -p klart-cli 2>&1); then
+            echo "::error::$target compiled. If a platform module for it now exists, move it to a job of its own."
+            exit 1
+          fi
 
-            if ! grep -q "klart has no platform module for this target yet" <<<"$output"; then
-              echo "::error::$target failed, but not at the seam:"
-              tail -40 <<<"$output"
-              exit 1
-            fi
+          if ! grep -q "klart has no platform module for this target yet" <<<"$output"; then
+            echo "::error::$target failed, but not at the seam:"
+            tail -40 <<<"$output"
+            exit 1
+          fi
 
-            echo "$target stops at the seam."
-          done
+          echo "$target stops at the seam."
+
+  linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `klart-tray` is AppKit and says so with a `compile_error!`, so the
+      # portable half is named explicitly rather than building the workspace.
+      # The tests that matter here are the ones that have no platform at all:
+      # the EDID parser, the DDC/CI protocol, the display key contract and the
+      # configuration format. Those are the promises a port has to keep, and
+      # this is where they are kept honest on something other than a Mac.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test -p klart-core -p klart-cli --all-features
+
+      - name: Docs
+        run: cargo doc -p klart-core -p klart-cli --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings

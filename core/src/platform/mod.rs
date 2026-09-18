@@ -18,13 +18,20 @@
 //! picture rather than a backlight — and that belongs in prose, not in a
 //! sequence some other platform would have to contort itself into.
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 
-#[cfg(target_os = "macos")]
-pub use macos::{LoginItem, login_item, set_login_item};
+#[cfg(target_os = "linux")]
+pub(crate) use linux::{config_directory, diagnose, displays, open};
+#[cfg(target_os = "linux")]
+pub use linux::{login_item, set_login_item};
+
 #[cfg(target_os = "macos")]
 pub(crate) use macos::{config_directory, diagnose, displays, open};
+#[cfg(target_os = "macos")]
+pub use macos::{login_item, set_login_item};
 
 // A build for another target would link and silently do nothing, which is worse
 // than not building. The seam above is what a port plugs into.
@@ -33,7 +40,7 @@ pub(crate) use macos::{config_directory, diagnose, displays, open};
 // error a build for a new platform produces. An unresolved import on top of it
 // tells a porter nothing they did not already know and buries the line that
 // does.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 compile_error!(
     "klart has no platform module for this target yet; see `platform::displays`, \
      `platform::open` and `platform::config_directory`, and PLAN.md"
