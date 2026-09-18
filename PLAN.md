@@ -573,3 +573,37 @@ One thing the selector arrangement cannot check at compile time is that the name
 `define_class!` registers and the name handed to the notification centre are the
 same string. They are checked at registration instead, because the alternative
 symptom is an unrecognized selector hours later that reads as a crash on resume.
+
+## 22. Lead with the probe
+
+- [x] `klart probe` in the README, with its own output and what the verdicts mean
+- [x] Say that the agent puts levels back after a sleep
+
+No code. The README described `klart` as a brightness control with a debugging
+aid attached, and that is backwards. Plenty of programs move a brightness
+slider. The thing this one does that is hard is say *why a monitor will not move*
+— and it says it from measurement, not from a list of things to try.
+
+So `probe` is now the second thing in the README, with its real output pasted in
+rather than described, and a table of what each verdict means and what to do
+about it. The table is taken from `Verdict::advice`, so the two say the same
+thing.
+
+The transcript is verbatim as far as the elision, which is marked. The built-in
+panel's block is cut down to the one line the paragraph underneath refers to: it
+is the control. Two displays, the same calls, the same process, one honouring
+the I2C chip address and one ignoring it — without that comparison `EdidOnly` is
+an assertion rather than a measurement, and it is worth the reader seeing both
+halves of it.
+
+Two things were wrong in the first draft of the section and are worth recording,
+because both would have been believed:
+
+- it offered `klart probe --json`, which does not exist. `--json` is on the
+  reading commands, not on this one. Left out rather than invented; a probe
+  transcript is for pasting into an issue, and adding the flag is its own change
+  with its own tests.
+- it had `NoI2c` and `NoChannel` the wrong way round. `NoChannel` is no I2C
+  channel published at all, which is what a virtual screen looks like — AirPlay,
+  Sidecar, DisplayLink. `NoI2c` is a channel that reads nothing, not even the
+  EDID.
