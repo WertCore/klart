@@ -133,17 +133,32 @@ fn link(display: &Display) -> Result<I2cLink> {
         display: display.key().to_string(),
     };
 
-    let connectors = drm::connected();
-    let connector = connectors
-        .get(display.id() as usize)
+    // By what the display published rather than by its position in the list.
+    // The list is read again here, and a monitor plugged or unplugged in between
+    // would shift every index after it — which would quietly drive the wrong
+    // display.
+    let bus = connector_for(display)
+        .ok_or_else(cannot_reach)?
+        .i2c_bus()
         .ok_or_else(cannot_reach)?;
-
-    let bus = connector.i2c_bus().ok_or_else(cannot_reach)?;
 
     I2cLink::open(bus).map_err(|problem| Error::MechanismFailed {
         mechanism: crate::ddc::NAME,
         call: "open /dev/i2c",
         code: problem.raw_os_error().unwrap_or(-1),
+    })
+}
+
+/// The connector a display came from, matched on its own EDID.
+fn connector_for(display: &Display) -> Option<Connector> {
+    let wanted = display.identity();
+
+    drm::connected().into_iter().find(|connector| {
+        edid::parse(&connector.edid).is_some_and(|found| {
+            found.manufacturer == wanted.manufacturer
+                && found.product == wanted.product
+                && found.serial == wanted.serial
+        })
     })
 }
 
@@ -176,9 +191,7 @@ pub(crate) fn diagnose() -> Result<Vec<Report>> {
         .map(|display| {
             let mut notes = vec![Note {
                 label: "connector".to_owned(),
-                value: drm::connected()
-                    .get(display.id() as usize)
-                    .map_or_else(|| "gone".to_owned(), |found| found.name.clone()),
+                value: connector_for(display).map_or_else(|| "gone".to_owned(), |found| found.name),
             }];
             let mut attempts = Vec::new();
 

@@ -1,6 +1,6 @@
 //! Asking a display why it will not answer.
 
-use crate::ddc::{CHIP_ADDRESS, DATA_ADDRESS, REPLY_DELAY, REPLY_LEN, VCP_BRIGHTNESS};
+use crate::ddc::{CHIP_ADDRESS, HOST_ADDRESS, REPLY_DELAY, REPLY_LEN, VCP_BRIGHTNESS};
 use crate::diagnose::{Attempt, Note, Report, Verdict};
 use crate::display::{Display, DisplayKind, displays};
 use crate::error::Result;
@@ -150,10 +150,10 @@ fn probe(display: &Display) -> Result<Report> {
     // A write being accepted says only that the request left the machine; what
     // makes a display answer DDC/CI is a reply that decodes.
     let what = format!(
-        "DDC/CI Get VCP {VCP_BRIGHTNESS:#04x} (chip {CHIP_ADDRESS:#04x}, offset {DATA_ADDRESS:#04x})"
+        "DDC/CI Get VCP {VCP_BRIGHTNESS:#04x} (chip {CHIP_ADDRESS:#04x}, offset {HOST_ADDRESS:#04x})"
     );
     let request = crate::ddc::get_request(VCP_BRIGHTNESS);
-    let answers = match service.write(CHIP_ADDRESS, DATA_ADDRESS, &request) {
+    let answers = match service.write(CHIP_ADDRESS, u32::from(HOST_ADDRESS), &request) {
         Err(code) => {
             attempts.push(Attempt {
                 what,
@@ -165,7 +165,7 @@ fn probe(display: &Display) -> Result<Report> {
             std::thread::sleep(REPLY_DELAY);
             let mut reply = [0_u8; REPLY_LEN];
 
-            match service.read(CHIP_ADDRESS, DATA_ADDRESS, &mut reply) {
+            match service.read(CHIP_ADDRESS, u32::from(HOST_ADDRESS), &mut reply) {
                 Err(code) => {
                     attempts.push(Attempt {
                         what,
