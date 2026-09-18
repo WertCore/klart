@@ -518,3 +518,151 @@ could not:
 One consequence worth remembering: the formula pins a version and a checksum, so
 every release needs the tap updated. Automating that from the release workflow is
 a reasonable follow-up and is not done.
+
+## 21. What people actually ask for
+
+- [x] Read the open issues, discussions and threads of the three comparators
+- [ ] Restore on wake, not only on launch and reconnect
+- [ ] Say so when HDR has taken the brightness control away
+- [ ] Scroll the tray icon
+- [ ] Decide whether the all-displays slider should keep relative offsets
+
+Everything below is counted from the comparators' own trackers on 18 September
+2026, written down so the numbers can be checked rather than believed. Reaction
+and comment counts are the signal — an issue nobody comments on is one person's
+preference, and a seven-year-old issue with forty comments is a product
+requirement.
+
+### The one complaint everybody has
+
+Brightness comes back wrong after sleep. It is the single most repeated
+grievance across all three projects, and it arrives in two shapes: the monitor
+forgets, and the program forgets.
+
+- Monitorian, "Restore brightness of external display which is reset to 100%
+  after restart/resume" — 4 reactions, 26 comments
+- MonitorControl discussion 615, "resets to 100% on Lock Screen or after Sleep"
+- MonitorControl discussion 850, "Always increases brightness of external
+  display after sleep"
+- MonitorControl, "App doesn't read brightness after waking up" — 4 reactions,
+  16 comments
+- MonitorControl, "App may crash on wake from sleep or display connect or
+  disconnect" — 4 reactions, 42 comments, the highest comment count found
+  anywhere in this survey
+
+klart already remembers a level and restores it, but only on two events: the
+agent starting, and a display appearing. Sleep and wake is neither, so today it
+has the same bug as everybody else. Closing that is the highest-value thing on
+this list and it is not large — the event exists on all three platforms
+(`NSWorkspace.didWakeNotification`, `WM_POWERBROADCAST`, logind's
+`PrepareForSleep`).
+
+The part that will be got wrong if it is rushed: a monitor does not answer DDC
+the instant the Mac wakes. The link comes back before the scaler does, so a
+single write on the wake notification lands in a void and reports success. It
+needs a bounded retry — read back and compare, not write and hope — which is
+also, conveniently, the thing that stops the write from racing whatever the
+monitor is doing to itself on resume.
+
+The crash reports clustering at the same moment are worth noticing separately.
+Wake, connect and disconnect are where display handles go stale, and a program
+that keeps one across the event gets a use-after-free. The comparators are
+Swift and C#, where an invalid `CGDirectDisplayID` is an integer nothing checks.
+klart's handles are behind `IoRef` and `CFRetained` and the mechanism is chosen
+per open rather than cached, so this is a class of bug it structurally does not
+have — but only as long as nothing starts caching a `Control` across a display
+change to save a few milliseconds. Worth stating here before somebody does.
+
+### Nobody can tell you why it failed
+
+The second theme is not a missing feature, it is a missing answer.
+
+MonitorControl discussion 1299 is the clearest case: DDC stopped working on M2
+Pro and M2 Max machines, eleven people reported it across LG, Dell, BenQ and
+Gigabyte monitors, and the resolution was that neither the users nor the
+maintainer could determine the cause — only that something in the architecture
+had changed. The advice given was to use a different application. The project
+also maintains a hand-written troubleshooting wiki page and a list of ports that
+do not work, which is what a project ends up with when the program cannot
+explain itself.
+
+This is what `klart probe` is for, and it is the one thing in this survey that
+no comparator has in any form. It is already built and it already answers this
+exact question — it distinguishes "the monitor declines" from "there is no
+channel" from "the link serves a cache and does no I2C", by measurement rather
+than by asking somebody to try another cable. The work remaining is not code:
+it is that the README treats it as a debugging aid rather than as the reason to
+choose this program.
+
+### Two things already shipped that others are still asking for
+
+- ddcutil, "Feature request: JSON output" — 15 reactions, the most-reacted
+  feature request found in this survey
+- ddcutil, "Parseable output" — 4 reactions
+- Monitorian, "Command-line options to get, set brightness, contrast or input" —
+  4 comments
+
+klart has `--json` and a command line on all three platforms, because the
+command line was the first thing built rather than an afterthought bolted to a
+GUI. Nothing to do here except know that it is a differentiator and say so.
+
+### HDR
+
+- Monitorian, "HDR monitors don't adjust brightness independently" — 8 comments
+- Monitorian, SDR content brightness under HDR
+
+Under HDR on Windows a monitor may switch picture mode, pin brightness to a
+preset, weaken the effect of a DDC write, or refuse hardware brightness control
+outright. The gamma ramp is not a reliable fallback either: Windows does not
+guarantee ramp behaviour in HDR mode, so the software path can be reduced or
+ignored as well.
+
+The realistic goal is not to fix this — it is largely the monitor's firmware —
+but to stop it looking like a bug in the program. A write that is accepted and
+changes nothing is exactly the failure `probe` exists to name, and HDR is a
+verdict it should learn: detect that the display is in HDR, report it as the
+reason, and suggest the one thing that does work. That is a small addition to
+`Verdict` and fits the existing shape.
+
+### Smaller, cheap, asked for
+
+- Scrolling the wheel over the tray icon to change brightness — Monitorian, 11
+  comments. No klart equivalent; the menu has to be opened first.
+- Preserving relative offsets so perceived brightness stays consistent when
+  several displays move together — MonitorControl, 2 comments.
+- Skipping launch-at-login when no external display is connected —
+  MonitorControl.
+- Reordering displays in the menu — MonitorControl.
+
+The offsets one is a genuine disagreement with a decision already made. Entry 15
+gave the all-displays slider absolute semantics: every display goes to the value
+shown. Relative semantics would move each display by the same delta and keep a
+monitor that was set dimmer dimmer. Absolute is easier to reason about and is
+the right default for "make everything 40%"; relative is what somebody wants
+when they have already balanced two panels by eye. This is a preference, not a
+bug, and the honest resolution is that it becomes one — not that the default
+flips. Recording it here so the decision is not quietly reversed by whoever
+reads the issue next.
+
+### On price
+
+Lunar runs a 14-day Pro trial and then falls back to a free tier, licences five
+Macs, and has a documented failure mode where the licence stops staying
+activated if the bundle is modified or Paddle's domains are blocked. klart is
+MIT or Apache-2.0 with nothing gated, which is worth stating plainly in the
+README rather than leaving someone to infer it.
+
+### What this changes
+
+Ranked by evidence behind them, not by how interesting they are to build:
+
+1. Restore on wake, with read-back retry. Fixes the most-complained-about
+   behaviour in the category and klart has it too.
+2. Lead with `probe`. Already built, genuinely unique, answers the question the
+   comparators close as unanswerable.
+3. An HDR verdict in `probe`. Small, and turns a "this app is broken" report
+   into an explanation.
+4. Scroll on the tray icon. Small, and asked for.
+5. Relative offsets as an option. Not a default change.
+
+Items 3 and 4 are worth doing whenever; item 1 is the one that should be next.
