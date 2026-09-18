@@ -184,8 +184,12 @@ jobs:
 
           ```sh
           brew install wertcore/tap/klart   # no quarantine, nothing to unblock
-          klart autostart on                # the agent holds gamma-dimmed displays
+          brew services start klart         # the agent holds gamma-dimmed displays
           ```
+
+          `brew services` rather than `klart autostart`: autostart registers an
+          application bundle with macOS, and a Homebrew install has no bundle —
+          only the two binaries. `klart autostart` is for the app below.
 
           **Nothing to clear, and no flag to pass for it.** Homebrew's formula
           downloader does not set the quarantine attribute, so there is nothing
@@ -211,6 +215,7 @@ jobs:
 
           ```sh
           ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
+          klart autostart on   # this one does have a bundle to register
           ```
 
           Apple silicon only: the registry walk that finds a monitor's name and

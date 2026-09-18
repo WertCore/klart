@@ -792,3 +792,45 @@ autostart, found while writing this and not fixed here; it has its own box below
 - [ ] Linux `autostart` writes a `.desktop` that runs the command line, which
       exits immediately. It should refuse on a platform with no agent, or say
       what it is for.
+
+## 28. Tell Homebrew users the command that works
+
+- [x] `brew services start klart`, not `klart autostart on`
+
+Entry 27's page told anyone installing through Homebrew to run `klart autostart
+on`, and that does not work there. Autostart registers an *application bundle*
+with `SMAppService`, and a Homebrew install has no bundle — only the two
+binaries out of it. Run that way it answers `unavailable — this is not running
+from the app bundle`, which reads as a broken program rather than the wrong
+command.
+
+The formula has said so in its own `caveats` since entry 20 and has carried a
+launchd `service` block for exactly this. The page contradicted the formula it
+was recommending.
+
+Checked rather than assumed, because the obvious fix is wrong too: installing the
+bundle into the Homebrew prefix and pointing `bin/klart` at the binary inside it
+does **not** help. `NSBundle` resolves the main bundle from the path the
+executable was invoked by, not from where the symlink lands, so a
+`bin/klart -> …/Klart.app/Contents/MacOS/klart` symlink still reports no bundle.
+Built and run both ways to confirm: through the symlink, `unavailable`; from
+inside the bundle, `off`.
+
+### On quarantine, once, so it stops coming up
+
+- A **formula** is never quarantined. Nothing in the formula install path applies
+  the attribute, and nothing in `/opt/homebrew/bin` on this machine carries it.
+- A **cask** still is. `Quarantine.cask!` sets it with the agent name "Homebrew
+  Cask", and `--no-quarantine` was deprecated in October 2025 and removed in July
+  2026. Moving the bundle to a cask to avoid `xattr` would do the opposite.
+- The **archive** is quarantined because a browser put it there, not because of
+  anything in this project.
+
+So `xattr` is needed on exactly one path, and the way to spare people is to make
+Homebrew the path they take — not to add a flag. Removing it from the archive
+path as well needs the bundle signed and notarised, which needs an Apple
+Developer account.
+
+- [ ] Sign and notarise the macOS bundle, if an Apple Developer account is ever
+      worth its fee here. That, and only that, removes the `xattr` step for
+      someone who downloads the zip.

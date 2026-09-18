@@ -232,9 +232,11 @@ li { margin-bottom: 0.4rem; }
 
 <pre><code>brew install wertcore/tap/klart   <span style="color:#a8a29e"># no quarantine, nothing to unblock</span></code></pre>
 
-    <p>On macOS, one more line is worth it if any display falls back to software dimming — macOS reverts a gamma ramp the moment the process that set it exits, so the menu bar agent is the thing that holds it:</p>
+    <p>On macOS, one more line is worth it if any display falls back to software dimming — macOS reverts a gamma ramp the moment the process that set it exits, so the menu bar agent is the thing that holds it. <code>klart list</code> marks those displays with a <code>*</code>.</p>
 
-<pre><code>klart autostart on</code></pre>
+<pre><code>brew services start klart</code></pre>
+
+    <p>That, rather than <code>klart autostart on</code>: autostart registers an <em>application bundle</em> with macOS, and a Homebrew install has no bundle — only the two binaries. <code>klart autostart</code> is for the app from the archive below.</p>
 
     <div class="note">
       <p><strong>Nothing to clear, and no flag to pass for it.</strong> Homebrew&rsquo;s formula downloader does not set the quarantine attribute, so there is nothing to undo. Quarantine is applied by browsers and LaunchServices — which is why a zip downloaded from the releases page needs clearing and this does not.</p>
