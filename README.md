@@ -71,6 +71,9 @@ control, because macOS reverts a gamma ramp when the process that set it exits.
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per
 change; nothing is ticked there until it has run against real hardware.
 
+[`PARITY.md`](PARITY.md) measures it against MonitorControl, Lunar, Monitorian
+and ddcutil, and orders what is missing.
+
 ## Installing
 
 Take the archive from [releases](https://github.com/WertCore/klart/releases),

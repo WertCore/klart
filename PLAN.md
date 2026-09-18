@@ -4,6 +4,9 @@ One entry per pull request. A box is ticked only once the change has run against
 real hardware — a green test suite on a headless runner is not evidence that a
 monitor dimmed, because a headless runner has no monitor.
 
+[`PARITY.md`](PARITY.md) is where the entries past this list come from: it
+measures `klart` against the established tools and orders the differences.
+
 ## 1. Scaffold the workspace
 
 - [x] Cargo workspace, pinned toolchain, `rustfmt` settings, dual licence
