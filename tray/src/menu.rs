@@ -12,7 +12,7 @@
 
 use std::rc::Rc;
 
-use klart_core::LoginItem;
+use klart_core::{Combined, LoginItem};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
@@ -133,6 +133,17 @@ define_class!(
             request::push(Request::SetLoginItem(wanted));
         }
 
+        #[unsafe(method(toggleKeepOffsets:))]
+        fn toggle_keep_offsets(&self, sender: &NSMenuItem) {
+            let wanted = sender.state() != NSControlStateValueOn;
+            sender.setState(if wanted {
+                NSControlStateValueOn
+            } else {
+                NSControlStateValueOff
+            });
+            request::push(Request::SetKeepOffsets(wanted));
+        }
+
         #[unsafe(method(lookAgain:))]
         fn look_again(&self, _sender: Option<&AnyObject>) {
             request::push(Request::Refresh);
@@ -193,7 +204,7 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
     let combined = (controls.len() > 1).then(|| {
         label(
             mtm,
-            &request::heading("All displays", driver.average(), false),
+            &request::heading("All displays", driver.open_combined(), false),
         )
     });
 
@@ -221,13 +232,17 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         menu.addItem(&label(mtm, "No displays found"));
     }
 
+    // Whether there is a combined slider at all, which is what decides whether
+    // the row that configures it is worth showing.
+    let combining = combined.is_some();
+
     if let Some(heading) = combined {
         menu.addItem(&heading);
         menu.addItem(&slider_row(
             mtm,
             &controller,
             ALL_DISPLAYS,
-            driver.average(),
+            driver.open_combined(),
             sel!(allDisplaysChanged:),
         ));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -256,6 +271,9 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
     }
 
     menu.addItem(&NSMenuItem::separatorItem(mtm));
+    if combining {
+        menu.addItem(&keep_offsets_item(mtm, &controller, driver.combined()));
+    }
     menu.addItem(&login_item(mtm, &controller));
     menu.addItem(&command(
         mtm,
@@ -318,6 +336,33 @@ fn login_item(mtm: MainThreadMarker, controller: &Controller) -> Retained<NSMenu
             item
         }
     }
+}
+
+/// The row that chooses what the combined slider does.
+///
+/// Only shown when there is a combined slider to choose for. A setting whose
+/// effect is not on screen is a setting nobody can connect to anything.
+fn keep_offsets_item(
+    mtm: MainThreadMarker,
+    controller: &Controller,
+    how: Combined,
+) -> Retained<NSMenuItem> {
+    // Named for what it does rather than for which of the two modes it is. Most
+    // people have never thought about absolute against relative, and do not need
+    // to in order to know whether they want their displays to stay as they set
+    // them.
+    let item = command(
+        mtm,
+        controller,
+        "Keep displays' relative brightness",
+        sel!(toggleKeepOffsets:),
+    );
+    item.setState(if how == Combined::Relative {
+        NSControlStateValueOn
+    } else {
+        NSControlStateValueOff
+    });
+    item
 }
 
 /// A menu row that is a slider.

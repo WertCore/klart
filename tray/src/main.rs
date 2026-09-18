@@ -105,6 +105,14 @@ fn main() -> ExitCode {
             match asked {
                 Request::Quit => return ExitCode::SUCCESS,
                 Request::Refresh => agent.look_again(mtm),
+                Request::SetKeepOffsets(wanted) => {
+                    agent.driver.set_combined(if wanted {
+                        klart_core::Combined::Relative
+                    } else {
+                        klart_core::Combined::Absolute
+                    });
+                    agent.redraw(mtm);
+                }
                 Request::SetLoginItem(wanted) => {
                     if let Err(problem) = klart_core::set_login_item(wanted) {
                         eprintln!("klart-tray: {problem}");

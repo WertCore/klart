@@ -22,6 +22,8 @@ pub enum Request {
     Refresh,
     /// Start with the session, or stop doing so.
     SetLoginItem(bool),
+    /// Move the displays together by a delta rather than onto one level.
+    SetKeepOffsets(bool),
     /// Stop the agent.
     Quit,
 }

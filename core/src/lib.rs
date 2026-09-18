@@ -68,4 +68,4 @@ pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
 pub use identity::DisplayKey;
 pub use platform::{login_item, set_login_item};
-pub use remembered::{Remembered, path as remembered_path};
+pub use remembered::{Combined, Remembered, path as remembered_path};
