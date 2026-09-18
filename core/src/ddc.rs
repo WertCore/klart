@@ -61,7 +61,7 @@ const OP_GET_REPLY: u8 = 0x02;
 pub(crate) const REPLY_LEN: usize = 11;
 
 /// The specification's minimum wait between a request and its reply.
-const REPLY_DELAY: Duration = Duration::from_millis(40);
+pub(crate) const REPLY_DELAY: Duration = Duration::from_millis(40);
 
 /// The specification's minimum wait between one message and the next.
 const MESSAGE_GAP: Duration = Duration::from_millis(50);
@@ -228,7 +228,7 @@ fn set_request(feature: u8, value: u16) -> [u8; 6] {
 /// bus that drops messages also delivers stale ones, and a reply to the previous
 /// request looks exactly like a reply to this one except in the feature it
 /// echoes.
-fn decode_reply(feature: u8, frame: &[u8]) -> Option<Reading> {
+pub(crate) fn decode_reply(feature: u8, frame: &[u8]) -> Option<Reading> {
     if frame.len() < REPLY_LEN {
         return None;
     }

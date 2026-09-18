@@ -18,6 +18,12 @@ monitor dimmed, because a headless runner has no monitor.
 - [x] A stable key per display, so configuration survives a reconnect and a
       `CGDirectDisplayID` that is not stable across one
 
+The reconnect half of that last box was argued structurally at first — the key
+contains no operating system handle — and has since been observed. The external
+display was unplugged, stayed away long enough to disappear from
+`system_profiler`, and came back as `SAM-71e3-HNAW900001`, byte for byte the key
+it had before.
+
 ## 3. The built-in panel
 
 - [x] `BrightnessBackend`, the trait the other two entries implement
@@ -47,8 +53,8 @@ all five failed identically, which is what rules the encoding out as the cause.
 
 What the write is refused with has since been decoded: `0xe0114102` is
 `sub_iokit_audio_video` (IOKit's `err_sub(0x45)`) with the family's own code 258.
-So it is the display coprocessor's own refusal, not a generic `kIOReturnUnsupported`
-— the request reached the AV family and that family said no.
+So it is the display coprocessor's own refusal rather than a generic
+`kIOReturnUnsupported` — the request reached the AV family and that family said no.
 
 Independent reverse engineering corroborates the framing. Asahi Linux implements
 DDC/CI through the same DCP firmware service macOS uses, as commands 9 and 10 on
@@ -58,12 +64,25 @@ a read. That is byte for byte what `crate::ddc` does. It also settles that there
 is no lower-level route: "the DCP firmware owns the DisplayPort AUX channel, so
 the AP cannot run I2C-over-AUX itself". Nothing in user space gets underneath it.
 
-Which leaves two candidate causes, and entry 13 exists to tell them apart:
+**The cause is now known, and it is neither of the two things it looked like.**
+Entry 13's probe found it. On this display's link the I2C chip address is
+*ignored*: a read at the DDC/CI address returns, byte for byte, what a read at
+the EDID address returns, and so does a read at any other address. Every write is
+refused, including to an address nothing lives at. The link serves a cached copy
+of the EDID and does no I2C at all, so nothing ever reaches the monitor — which
+rules out the monitor's own DDC/CI setting, because the monitor is never asked.
 
-1. the monitor has DDC/CI switched off in its own menu, which is how many ship
-2. the cable converts DisplayPort to HDMI inside itself and does not carry I2C
+The control that makes that conclusive is the built-in panel, on the same
+machine, through the same calls in the same process: it *honours* the chip
+address — `0x50` returns the EDID header and `0x37` returns zeros — and it
+accepts writes. So the difference is the link, not the interface and not the
+machine.
 
-Verifying entry 4 needs whichever of those turns out to be true to be fixed.
+The link is `DP -> HDMI`, which is to say the DisplayPort-to-HDMI conversion
+happens inside the cable. Ticking these two boxes needs a link with no conversion
+in it: USB-C to DisplayPort, into the monitor's DisplayPort input. The probe will
+say so either way — if the chip address starts being honoured on such a link,
+the cable was the cause.
 
 ## 5. The gamma fallback, and choosing between the three
 
@@ -246,21 +265,29 @@ read costs the better part of a tenth of a second.
 
 - [x] `klart probe`: what was tried, what came back, and what it means
 - [x] Decode `IOReturn` into its subsystem, which is where the meaning is
-- [ ] Run it against a display that refuses DDC/CI
+- [x] Run it against a display that refuses DDC/CI
 
 Every tool in this space reports the same thing when DDC/CI fails: that it
 failed. That is the least useful true statement available, because the ordinary
 causes want different responses — turn a setting on, change a cable, or accept
 the software fallback.
 
-The question that separates them is whether the link carries I2C at all. A
-display's EDID sits on the same two wires at a different address and is always
-present, because the machine could not be drawing a picture otherwise. So reading
-the EDID back over I2C is the control in the experiment:
+The first attempt at a control was reading the EDID, on the grounds that it sits
+on the same two wires at a different address and is always present. That is
+wrong, and running it proved it wrong: a successful EDID read does not mean an
+I2C transaction happened. The coprocessor caches the EDID when the link comes up
+and will serve that cache while ignoring the address it was asked for.
 
-- EDID reads, DDC/CI refused → the wires are fine and the monitor is declining.
-  Look for DDC/CI in its on-screen menu; most ship with it off.
-- EDID does not read → something in the cable, adaptor or dock is not passing
-  I2C, and no amount of framing will change that.
+The control that works is to read the *same offset at two different chip
+addresses*. On a link doing real I2C they differ, because they are two different
+devices. Identical bytes mean the address was ignored and both came from one
+cache. That distinguishes:
 
-The last box needs the external display back to be ticked.
+- addresses differ, DDC/CI refused → transactions reach the monitor and it is
+  declining. Look for DDC/CI in its on-screen menu; most ship with it off.
+- addresses identical → the link does no I2C. Nothing reaches the monitor, the
+  monitor's own settings are irrelevant, and no software can change it.
+
+Where a machine has one link of each kind, the probe says so, because one link
+failing proves only that something is wrong — another link succeeding through the
+same calls is what proves the difference is the link.
