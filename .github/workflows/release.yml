@@ -172,6 +172,12 @@ jobs:
           over D-Bus or `Shell_NotifyIcon`, which is a new program rather than a
           build flag.
 
+          That table is about platforms. Individual features can be newer than
+          the hardware they have been tried on, and `PLAN.md` says so per feature:
+          every entry there carries its own unticked boxes for the checks that
+          still need a machine. It is worth a look before depending on something
+          new.
+
           ## macOS
 
           Unzip and move `Klart.app` to `/Applications`. It is **not signed or
