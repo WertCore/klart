@@ -9,13 +9,20 @@
 //! So this asks a series of questions whose answers separate those cases, and
 //! reports what it found rather than a yes or a no.
 //!
-//! The question that does most of the work is whether the link carries I2C *at
-//! all*. A display's EDID lives on the same two wires as DDC/CI, at a different
-//! address, and it is readable by definition — the machine is already using the
-//! picture. So an EDID that reads back over I2C proves the wires are connected
-//! end to end, which means a DDC/CI refusal is the monitor's decision. An EDID
-//! that does not proves the opposite: something between here and the monitor is
-//! not carrying I2C, and no amount of DDC/CI framing will change that.
+//! The question that does most of the work is whether the link does general I2C
+//! at all, and the way to find out is not the obvious one.
+//!
+//! Reading a display's EDID looks like the right control — it lives on the same
+//! two wires as DDC/CI at a different address, and it is always there. But it is
+//! not, because a successful EDID read does not prove an I2C transaction
+//! happened. The display coprocessor reads and caches the EDID when the link
+//! comes up, and on a link where it cannot run I2C it will serve that cache and
+//! ignore the address it was asked for.
+//!
+//! So the control is to read the *same offset* at two different chip addresses.
+//! On a link doing real I2C those answer differently, because one is the EDID
+//! EEPROM and the other is the DDC/CI slave. On a link serving a cache they are
+//! byte for byte identical, and that identity is the tell.
 
 use crate::display::DisplayKind;
 use crate::error::Result;
@@ -34,6 +41,12 @@ pub struct Report {
     pub notes: Vec<Note>,
     /// What was tried, in order, and what came back.
     pub attempts: Vec<Attempt>,
+    /// Whether this link honoured the I2C chip address it was given.
+    ///
+    /// The finding every verdict here rests on, exposed so that a caller can
+    /// corroborate it: a machine where one link honours the address and another
+    /// does not has proved the difference is the link rather than the API.
+    pub address_honoured: Option<bool>,
     /// What the above adds up to.
     pub verdict: Verdict,
 }
@@ -65,11 +78,13 @@ pub enum Verdict {
     NotApplicable,
     /// Nothing on this machine offers an I2C channel to this display.
     NoChannel,
-    /// The channel exists but does not reach the monitor.
+    /// The channel exists and reads nothing at all.
+    NoI2c,
+    /// The channel serves the cached EDID and does no I2C.
     ///
-    /// The EDID could not be read over it either, and the EDID is the one thing
-    /// on that bus which is always there.
-    LinkDoesNotCarryI2c,
+    /// Reads return the same bytes whichever address is asked for, and writes
+    /// are refused outright — so nothing on this link ever reaches the monitor.
+    EdidOnly,
     /// The channel reaches the monitor, which will not talk DDC/CI.
     MonitorDeclines,
     /// The answers do not fit any of the above.
@@ -93,21 +108,29 @@ impl Verdict {
                  carry DDC/CI by design. Software dimming is the only option."
             }
 
-            Self::LinkDoesNotCarryI2c => {
-                "The monitor's own EDID could not be read over I2C, and the EDID is always there \
-                 on a working bus — so something between this Mac and the monitor is not passing \
-                 I2C through. That is the cable, adaptor, hub or dock. Cheap USB-C-to-HDMI \
-                 converters and DisplayLink docks commonly strip DDC/CI while passing the \
-                 picture perfectly. Try a USB-C-to-DisplayPort cable into the monitor's \
-                 DisplayPort input, which needs no protocol conversion at all."
+            Self::NoI2c => {
+                "Nothing could be read over this link at all, not even the EDID. Something \
+                 between this Mac and the monitor is not passing I2C. Try a different cable, and \
+                 prefer one with no protocol conversion in it."
+            }
+
+            Self::EdidOnly => {
+                "This link serves a cached copy of the monitor's EDID and does no I2C: reads \
+                 return the same bytes whichever address they ask for, and every write is \
+                 refused. Nothing here ever reaches the monitor, so this is not the monitor's \
+                 DDC/CI setting and no software can change it — the monitor is never asked. \
+                 The display coprocessor behaves this way when it cannot run I2C over the link, \
+                 which is what a DisplayPort-to-HDMI conversion inside a cable or adaptor \
+                 causes. Use a link with no conversion in it: USB-C to DisplayPort, into the \
+                 monitor's DisplayPort input."
             }
 
             Self::MonitorDeclines => {
-                "The link carries I2C — the monitor's EDID was read over it — so the wires are \
-                 fine and the monitor is refusing DDC/CI itself. Most monitors ship with it \
-                 switched off. Look in the on-screen menu under System, General or Setup for an \
-                 entry called DDC/CI, Monitor Control, External Control or PC Control, and turn \
-                 it on."
+                "The link does real I2C — two addresses answered differently, so transactions \
+                 are reaching the monitor — and the monitor is refusing DDC/CI itself. Most \
+                 monitors ship with it switched off. Look in the on-screen menu under System, \
+                 General or Setup for an entry called DDC/CI, Monitor Control, External Control \
+                 or PC Control, and turn it on."
             }
 
             Self::Unclear => {

@@ -194,6 +194,45 @@ pub fn probe(reports: &[klart_core::Report]) {
             println!("  {line}");
         }
     }
+
+    corroborate(reports);
+}
+
+/// Says so when the displays disagree about whether the chip address is
+/// honoured.
+///
+/// One link ignoring it proves only that something is wrong. Another link on the
+/// same machine honouring it, through the same calls in the same process, is
+/// what proves the difference is the link rather than the interface.
+fn corroborate(reports: &[klart_core::Report]) {
+    let honoured: Vec<&str> = reports
+        .iter()
+        .filter(|report| report.address_honoured == Some(true))
+        .map(|report| report.display.as_str())
+        .collect();
+    let ignored: Vec<&str> = reports
+        .iter()
+        .filter(|report| report.address_honoured == Some(false))
+        .map(|report| report.display.as_str())
+        .collect();
+
+    if honoured.is_empty() || ignored.is_empty() {
+        return;
+    }
+
+    println!();
+    for line in wrap(
+        &format!(
+            "Corroborated on this machine: {} honoured the I2C chip address and {} ignored it, \
+             through the same calls in the same process. The difference is the link, not the \
+             interface.",
+            honoured.join(", "),
+            ignored.join(", ")
+        ),
+        74,
+    ) {
+        println!("{line}");
+    }
 }
 
 /// Breaks a paragraph so a terminal does not have to.

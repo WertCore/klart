@@ -1,6 +1,6 @@
 //! Asking a display why it will not answer.
 
-use crate::ddc::{CHIP_ADDRESS, DATA_ADDRESS, VCP_BRIGHTNESS};
+use crate::ddc::{CHIP_ADDRESS, DATA_ADDRESS, REPLY_DELAY, REPLY_LEN, VCP_BRIGHTNESS};
 use crate::diagnose::{Attempt, Note, Report, Verdict};
 use crate::display::{Display, DisplayKind, displays};
 use crate::error::Result;
@@ -15,9 +15,11 @@ use super::ioreg;
 /// otherwise. That is what makes it the control in this experiment.
 const EDID_CHIP: u32 = 0x50;
 
-/// How much of it to read. The first block is all that is needed to tell a real
-/// EDID from noise.
-const EDID_LEN: usize = 128;
+/// How many bytes to compare between the two addresses.
+///
+/// A whole EDID block, because a short read could match by coincidence where a
+/// hundred and twenty-eight bytes cannot.
+const SAMPLE: usize = 128;
 
 /// The eight bytes every EDID begins with.
 const EDID_HEADER: [u8; 8] = [0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00];
@@ -42,7 +44,8 @@ fn probe(display: &Display) -> Result<Report> {
         identity.manufacturer,
         identity.product,
         identity.serial,
-    );
+    )
+    .or_else(|| built_in_node(&nodes, display));
 
     // Whether the registry describes this display at all. The built-in panel
     // publishes a product identifier far too wide to be an EDID product code, so
@@ -77,6 +80,7 @@ fn probe(display: &Display) -> Result<Report> {
             kind: display.kind(),
             notes,
             attempts,
+            address_honoured: None,
             verdict: Verdict::NoChannel,
         });
     }
@@ -98,6 +102,7 @@ fn probe(display: &Display) -> Result<Report> {
             kind: display.kind(),
             notes,
             attempts,
+            address_honoured: None,
             verdict: if display.kind() == DisplayKind::BuiltIn {
                 Verdict::NotApplicable
             } else {
@@ -106,66 +111,104 @@ fn probe(display: &Display) -> Result<Report> {
         });
     };
 
-    // The control: can anything at all be read over this bus?
-    let mut edid = [0_u8; EDID_LEN];
-    let carries_i2c = match service.read(EDID_CHIP, 0x00, &mut edid) {
-        Ok(()) if edid[..8] == EDID_HEADER => {
-            attempts.push(Attempt {
-                what: format!("read EDID over I2C (chip {EDID_CHIP:#04x})"),
-                outcome: Ok(format!(
-                    "{EDID_LEN} bytes, header valid, EDID version {}.{}",
-                    edid[18], edid[19]
-                )),
-            });
-            true
-        }
-        Ok(()) => {
-            attempts.push(Attempt {
-                what: format!("read EDID over I2C (chip {EDID_CHIP:#04x})"),
-                outcome: Err(format!(
-                    "read succeeded but the bytes are not an EDID: {:02x?}",
-                    &edid[..8]
-                )),
-            });
-            false
-        }
-        Err(code) => {
-            attempts.push(Attempt {
-                what: format!("read EDID over I2C (chip {EDID_CHIP:#04x})"),
-                outcome: Err(describe(code)),
-            });
-            false
-        }
-    };
+    // The reference: whatever the EDID address returns.
+    let mut edid = [0_u8; SAMPLE];
+    let edid_read = service.read(EDID_CHIP, 0x00, &mut edid);
+    attempts.push(Attempt {
+        what: format!("read {SAMPLE} bytes at the EDID address ({EDID_CHIP:#04x})"),
+        outcome: match &edid_read {
+            Ok(()) if edid[..8] == EDID_HEADER => Ok(format!(
+                "valid EDID header, version {}.{}",
+                edid[18], edid[19]
+            )),
+            Ok(()) => Ok(format!("{:02x?}, which is not an EDID header", &edid[..8])),
+            Err(code) => Err(describe(*code)),
+        },
+    });
 
-    // The thing actually wanted.
+    // The control: the same offset at the DDC/CI address. On a link doing real
+    // I2C these differ, because they are two different devices. Identical bytes
+    // mean the address was ignored and both came from the same cache.
+    let mut at_ddc = [0_u8; SAMPLE];
+    let ddc_read = service.read(CHIP_ADDRESS, 0x00, &mut at_ddc);
+    let address_ignored = edid_read.is_ok() && ddc_read.is_ok() && at_ddc == edid;
+    attempts.push(Attempt {
+        what: format!("read the same {SAMPLE} bytes at the DDC/CI address ({CHIP_ADDRESS:#04x})"),
+        outcome: match &ddc_read {
+            Ok(()) if address_ignored => Err(
+                "byte for byte identical to the EDID address — the chip address is being ignored"
+                    .to_owned(),
+            ),
+            Ok(()) => Ok("differs from the EDID address, so the address is honoured".to_owned()),
+            Err(code) => Err(describe(*code)),
+        },
+    });
+
+    let reaches_monitor = ddc_read.is_ok() && !address_ignored;
+
+    // The thing actually wanted, and the whole exchange rather than half of it.
+    // A write being accepted says only that the request left the machine; what
+    // makes a display answer DDC/CI is a reply that decodes.
+    let what = format!(
+        "DDC/CI Get VCP {VCP_BRIGHTNESS:#04x} (chip {CHIP_ADDRESS:#04x}, offset {DATA_ADDRESS:#04x})"
+    );
     let request = crate::ddc::get_request(VCP_BRIGHTNESS);
     let answers = match service.write(CHIP_ADDRESS, DATA_ADDRESS, &request) {
-        Ok(()) => {
-            attempts.push(Attempt {
-                what: format!(
-                    "DDC/CI Get VCP {VCP_BRIGHTNESS:#04x} (chip {CHIP_ADDRESS:#04x}, offset {DATA_ADDRESS:#04x})"
-                ),
-                outcome: Ok("write accepted".to_owned()),
-            });
-            true
-        }
         Err(code) => {
             attempts.push(Attempt {
-                what: format!(
-                    "DDC/CI Get VCP {VCP_BRIGHTNESS:#04x} (chip {CHIP_ADDRESS:#04x}, offset {DATA_ADDRESS:#04x})"
-                ),
+                what,
                 outcome: Err(describe(code)),
             });
             false
         }
+        Ok(()) => {
+            std::thread::sleep(REPLY_DELAY);
+            let mut reply = [0_u8; REPLY_LEN];
+
+            match service.read(CHIP_ADDRESS, DATA_ADDRESS, &mut reply) {
+                Err(code) => {
+                    attempts.push(Attempt {
+                        what,
+                        outcome: Err(format!(
+                            "write accepted, reading the reply: {}",
+                            describe(code)
+                        )),
+                    });
+                    false
+                }
+                Ok(()) => match crate::ddc::decode_reply(VCP_BRIGHTNESS, &reply) {
+                    Some(reading) => {
+                        attempts.push(Attempt {
+                            what,
+                            outcome: Ok(format!(
+                                "answered: {} of {}",
+                                reading.current, reading.maximum
+                            )),
+                        });
+                        true
+                    }
+                    None => {
+                        attempts.push(Attempt {
+                            what,
+                            outcome: Err(format!(
+                                "write accepted but the reply is not one: {:02x?}",
+                                &reply[..8.min(reply.len())]
+                            )),
+                        });
+                        false
+                    }
+                },
+            }
+        }
     };
 
-    let verdict = match (display.kind(), carries_i2c, answers) {
-        (DisplayKind::BuiltIn, _, false) => Verdict::NotApplicable,
-        (_, _, true) => Verdict::Answers,
-        (_, true, false) => Verdict::MonitorDeclines,
-        (_, false, false) => Verdict::LinkDoesNotCarryI2c,
+    let verdict = match (display.kind(), answers) {
+        (_, true) => Verdict::Answers,
+        (DisplayKind::BuiltIn, false) => Verdict::NotApplicable,
+        (_, false) if address_ignored => Verdict::EdidOnly,
+        (_, false) if reaches_monitor => Verdict::MonitorDeclines,
+        (_, false) if edid_read.is_err() && ddc_read.is_err() => Verdict::NoI2c,
+        (_, false) => Verdict::Unclear,
     };
 
     Ok(Report {
@@ -174,8 +217,39 @@ fn probe(display: &Display) -> Result<Report> {
         kind: display.kind(),
         notes,
         attempts,
+        address_honoured: (edid_read.is_ok() && ddc_read.is_ok()).then_some(!address_ignored),
         verdict,
     })
+}
+
+/// The registry node for the built-in panel, which the EDID join cannot find.
+///
+/// The panel publishes a product identifier far wider than an EDID product code
+/// — forty-six bits on this machine — so it never equals what Core Graphics
+/// reports and the ordinary join misses it. Nothing depends on finding it to
+/// control a display, because the panel has its own mechanism. It matters here
+/// because the panel's I2C channel is the control in this experiment: a link
+/// that honours the chip address, on the same machine, through the same calls.
+///
+/// Matching on the manufacturer alone is safe for exactly one display, and a
+/// machine has exactly one built-in panel.
+fn built_in_node<'a>(
+    nodes: &'a [ioreg::DisplayNode],
+    display: &Display,
+) -> Option<&'a ioreg::DisplayNode> {
+    if display.kind() != DisplayKind::BuiltIn {
+        return None;
+    }
+
+    let manufacturer = u64::from(display.identity().manufacturer);
+    let mut candidates = nodes.iter().filter(|node| {
+        node.attributes.legacy_manufacturer_id == Some(manufacturer)
+            && node.attributes.name.is_none()
+    });
+
+    let only = candidates.next()?;
+    // More than one and the match means nothing.
+    candidates.next().is_none().then_some(only)
 }
 
 /// Turns an `IOReturn` into something a person can act on.
