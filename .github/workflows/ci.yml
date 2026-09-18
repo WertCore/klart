@@ -37,3 +37,30 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+      # The portability seam is a claim until something checks it. A build for
+      # another platform has to stop at `platform`'s own `compile_error!`, which
+      # names the functions a port implements. If it stops inside a dependency
+      # instead, an Apple-only crate has escaped its target table and the seam
+      # has quietly stopped being real — which nobody would find out until
+      # somebody started a port.
+      - name: The seam holds for other platforms
+        shell: bash
+        run: |
+          set -uo pipefail
+          for target in x86_64-pc-windows-msvc x86_64-unknown-linux-gnu; do
+            rustup target add "$target"
+
+            if output=$(cargo check --target "$target" --workspace 2>&1); then
+              echo "::error::$target compiled. If a platform module for it now exists, this check needs updating."
+              exit 1
+            fi
+
+            if ! grep -q "klart has no platform module for this target yet" <<<"$output"; then
+              echo "::error::$target failed, but not at the seam:"
+              tail -40 <<<"$output"
+              exit 1
+            fi
+
+            echo "$target stops at the seam."
+          done

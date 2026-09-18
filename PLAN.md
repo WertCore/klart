@@ -179,10 +179,19 @@ is not, so the framing, the checksums, the reply validation and the retries move
 to `ddc`, behind a `Link` trait that is four lines wide. Its nine tests no longer
 need a Mac to run.
 
-The seam is two functions: `platform::displays` and `platform::open`. The order
-mechanisms are tried in sits inside the platform rather than above it, because it
-is not the same list everywhere — Windows has two hardware paths and neither is
-`DisplayServices`.
+The seam is `platform::displays`, `platform::open` and `platform::config_directory`.
+The order mechanisms are tried in sits inside the platform rather than above it,
+because it is not the same list everywhere — Windows has two hardware paths and
+neither is `DisplayServices`.
+
+It was a claim rather than a fact until the dependencies were made to follow the
+platform. They sat in a plain `[dependencies]` table, so a build for another
+target failed inside a binding crate that refuses to compile off Apple hardware,
+several layers below anything a porter could act on. They are under a target
+table now, and a build for Windows or Linux stops at exactly one error — this
+module's own, naming the three functions to implement. CI checks that, because a
+seam nothing exercises stops being one the first time an Apple-only crate creeps
+back into the wrong table.
 
 This entry also deleted the gamma panic button. Entry 5 measured that macOS puts
 a ramp back when the process that set it exits, `SIGKILL` included, so there was
