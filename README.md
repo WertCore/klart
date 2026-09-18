@@ -48,6 +48,7 @@ $ klart get --json
 $ klart restore
 $ klart probe        # why won't this monitor answer?
 $ klart autostart on # start the menu bar agent at login
+$ klart rename 1 "Desk monitor"
 ```
 
 Commands act on the display holding the menu bar unless told otherwise.
