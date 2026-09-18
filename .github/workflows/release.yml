@@ -180,9 +180,24 @@ jobs:
 
           ## macOS
 
+          Homebrew, which has nothing to undo afterwards:
+
+          ```sh
+          brew install wertcore/tap/klart
+          klart autostart on   # the agent holds gamma-dimmed displays
+          ```
+
+          **No quarantine step, and no flag to pass for it.** `--no-quarantine`
+          is a cask option; klart is a formula, and Homebrew's formula downloader
+          does not set the attribute at all. Quarantine is applied by browsers
+          and LaunchServices, which is why the archive below needs clearing and
+          this does not.
+
+          ### Or the archive
+
           Unzip and move `Klart.app` to `/Applications`. It is **not signed or
-          notarised**, so the first launch is refused — right-click it and choose
-          Open, or:
+          notarised**, and a browser put it there, so the first launch is refused
+          — right-click it and choose Open, or:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/Klart.app
@@ -192,7 +207,6 @@ jobs:
 
           ```sh
           ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
-          klart autostart on   # the agent holds gamma-dimmed displays
           ```
 
           Apple silicon only: the registry walk that finds a monitor's name and
@@ -201,8 +215,8 @@ jobs:
           ## Linux
 
           ```sh
-          tar xzf klart-*-linux-x86_64.tar.gz
-          ./klart list
+          brew install wertcore/tap/klart   # x86_64, or:
+          tar xzf klart-*-linux-x86_64.tar.gz && ./klart list
           ```
 
           Two permissions it will want, and neither is this program's to grant:

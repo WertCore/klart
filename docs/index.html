@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>klart — brightness for every display</title>
+<meta name="description" content="Brightness for every display attached to the machine, built-in or not. And when a monitor will not dim, klart tells you why.">
+<link rel="canonical" href="https://wertcore.github.io/klart/">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="klart — brightness for every display">
+<meta property="og:description" content="Brightness for every display, built-in or not. And when a monitor will not dim, klart measures why rather than listing things to try.">
+<meta property="og:url" content="https://wertcore.github.io/klart/">
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☀️</text></svg>">
+
+<style>
+:root {
+  --bg: #fdfcfa;
+  --panel: #ffffff;
+  --ink: #1c1917;
+  --muted: #6b6560;
+  --line: #e7e2db;
+  --accent: #b45309;
+  --accent-soft: #fef3c7;
+  --code-bg: #1c1917;
+  --code-ink: #e7e5e4;
+  --ok: #15803d;
+  --warn: #b45309;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14110f;
+    --panel: #1c1917;
+    --ink: #eae7e3;
+    --muted: #a8a29e;
+    --line: #2f2a26;
+    --accent: #fbbf24;
+    --accent-soft: #2a2015;
+    --code-bg: #0c0a09;
+    --code-ink: #e7e5e4;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.65 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 47rem; margin: 0 auto; padding: 0 1.4rem; }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+
+code, pre, kbd {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+code {
+  font-size: 0.88em;
+  background: var(--accent-soft);
+  color: var(--ink);
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 1rem 1.1rem;
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  margin: 0 0 1rem;
+}
+pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+
+/* ---- header ---- */
+
+header {
+  padding: 4.5rem 0 3rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.6rem;
+}
+.logo .sun {
+  width: 0.78em; height: 0.78em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fde68a, var(--accent));
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  align-self: center;
+}
+
+.tagline {
+  font-size: 1.22rem;
+  line-height: 1.5;
+  margin: 0 0 0.5rem;
+  max-width: 34rem;
+}
+.lede {
+  font-size: 1.22rem;
+  color: var(--accent);
+  font-weight: 600;
+  margin: 0 0 1.6rem;
+  max-width: 34rem;
+}
+
+.badges { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.badge {
+  font-size: 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  color: var(--muted);
+  background: var(--panel);
+  text-decoration: none;
+}
+.badge strong { color: var(--ink); font-weight: 600; }
+
+/* ---- sections ---- */
+
+section { padding: 3rem 0; border-bottom: 1px solid var(--line); }
+section:last-of-type { border-bottom: 0; }
+
+h2 {
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.4rem;
+}
+h3 {
+  font-size: 1rem;
+  margin: 1.8rem 0 0.5rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.sub { color: var(--muted); margin: 0 0 1.4rem; max-width: 36rem; }
+
+p { margin: 0 0 1rem; }
+
+/* ---- tables ---- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.55rem 0.7rem 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+th { font-weight: 600; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+td:first-child { font-weight: 600; white-space: nowrap; padding-right: 1.2rem; }
+
+.yes { color: var(--ok); font-weight: 600; }
+.no  { color: var(--warn); font-weight: 600; }
+
+/* ---- verdict list ---- */
+
+.verdict { margin: 0 0 1.1rem; padding: 0 0 0 1rem; border-left: 3px solid var(--line); }
+.verdict b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+.verdict p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.93rem; }
+
+/* ---- callout ---- */
+
+.note {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1.2rem;
+  font-size: 0.93rem;
+}
+.note :last-child { margin-bottom: 0; }
+
+/* ---- footer ---- */
+
+footer {
+  padding: 2.5rem 0 4rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+footer a { color: var(--muted); }
+
+ul { padding-left: 1.2rem; }
+li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1 class="logo"><span class="sun"></span>klart</h1>
+    <p class="tagline">Brightness for every display attached to the machine — the built-in panel and external monitors alike, from the menu bar or the command line.</p>
+    <p class="lede">And when a monitor will not dim, it tells you why.</p>
+    <div class="badges">
+      <a class="badge" href="https://github.com/WertCore/klart/releases/latest"><strong>v0.3.0</strong></a>
+      <span class="badge">macOS · Linux · Windows</span>
+      <span class="badge">MIT <strong>or</strong> Apache-2.0</span>
+      <a class="badge" href="https://github.com/WertCore/klart">Source on <strong>GitHub</strong></a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="sub">Homebrew covers macOS (Apple silicon) and Linux (x86_64).</p>
+
+<pre><code>brew install wertcore/tap/klart</code></pre>
+
+    <p>On macOS, one more line is worth it if any display falls back to software dimming — macOS reverts a gamma ramp the moment the process that set it exits, so the menu bar agent is the thing that holds it:</p>
+
+<pre><code>klart autostart on</code></pre>
+
+    <div class="note">
+      <p><strong>No quarantine step, and no flag to pass for it.</strong> <code>--no-quarantine</code> is a cask option; klart is a formula, and Homebrew&rsquo;s formula downloader never sets the attribute. Quarantine is applied by browsers and LaunchServices — which is why a zip downloaded from the releases page needs clearing and this does not.</p>
+    </div>
+
+    <h3>Or the archives</h3>
+    <p>Every release carries a macOS app bundle, a Linux tarball and a Windows zip — <a href="https://github.com/WertCore/klart/releases/latest">on the releases page</a>. A bundle that arrived through a browser <em>is</em> quarantined, and klart is not signed or notarised, so:</p>
+<pre><code>xattr -dr com.apple.quarantine /Applications/Klart.app</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>When a monitor will not answer</h2>
+    <p class="sub">Some monitors cannot be dimmed over the wire, and the usual answer is a list of things to try: another cable, another port, a setting in the on-screen menu, a different application. <code>klart probe</code> measures instead.</p>
+
+<pre><code>$ klart probe
+LS32AG55x (SAM-71e3-HNAW900001)
+  Core Graphics id 2
+  registry node    matched
+  link             DP -&gt; HDMI
+  I2C channel      published
+  ok               read 128 bytes at the EDID address (0x50): valid EDID header, version 1.3
+  failed           read the same 128 bytes at the DDC/CI address (0x37): byte for byte
+                   identical to the EDID address — the chip address is being ignored
+  failed           DDC/CI Get VCP 0x10 (chip 0x37, offset 0x51): 0xe0114102
+
+  EdidOnly
+  This link serves a cached copy of the monitor's EDID and does no I2C:
+  reads return the same bytes whichever address they ask for, and every
+  write is refused. Nothing here ever reaches the monitor, so this is not
+  the monitor's DDC/CI setting and no software can change it — the
+  monitor is never asked. Use a link with no conversion in it: USB-C to
+  DisplayPort, into the monitor's DisplayPort input.
+
+Built-in Display (builtin)
+  ...
+  ok               read the same 128 bytes at the DDC/CI address (0x37): differs from
+                   the EDID address, so the address is honoured
+  ...
+
+Corroborated on this machine: Built-in Display honoured the I2C chip
+address and LS32AG55x ignored it, through the same calls in the same
+process. The difference is the link, not the interface.</code></pre>
+
+    <p>Every line is something that was attempted, with what came back. The verdict is derived from those attempts and nothing else:</p>
+
+    <div class="verdict"><b>Answers</b><p>DDC/CI is working. If brightness still will not move, the problem is elsewhere.</p></div>
+    <div class="verdict"><b>MonitorDeclines</b><p>Two addresses answered differently, so transactions <em>are</em> reaching the monitor — and it is refusing DDC/CI itself. Most ship with it off. Turn on DDC/CI, Monitor Control, External Control or PC Control in its own menu.</p></div>
+    <div class="verdict"><b>EdidOnly</b><p>The link serves a cached EDID and does no I2C. The monitor is never asked, so this is <em>not</em> its DDC/CI setting and no software can change it. Use a link with no protocol conversion.</p></div>
+    <div class="verdict"><b>NoI2c</b><p>Nothing could be read over this link at all, not even the EDID. Something between the machine and the monitor is not passing I2C.</p></div>
+    <div class="verdict"><b>NoChannel</b><p>No I2C channel on this machine at all — what a virtual screen looks like: AirPlay, Sidecar, DisplayLink. None carry DDC/CI by design, and klart falls back to software dimming.</p></div>
+    <div class="verdict"><b>HdrInTheWay</b><p>The display is in HDR, and brightness control did not answer. Those go together: an HDR picture mode commonly pins brightness or stops honouring the feature. Windows only.</p></div>
+    <div class="verdict"><b>NotApplicable</b> <b>·</b> <b>Unclear</b><p>The built-in panel, which has its own mechanism — or attempts that fit no known pattern, in which case the output above is the evidence.</p></div>
+
+    <p>The last line of the output is the control, and it is what makes the verdict a measurement rather than a guess. Two displays, the same calls, the same process: if one honours the I2C chip address and the other ignores it, the interface works and the difference is the link.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>New in 0.3.0</h2>
+    <p class="sub">Driven by what people ask the other tools for, counted from their issue trackers.</p>
+
+    <h3>Levels go back after a sleep</h3>
+    <p>Brightness coming back wrong after a sleep is the single most-complained-about behaviour in this category. The reason it is hard is that a display does not answer the instant the machine wakes — the link returns before the panel behind it, and a write sent then is accepted and dropped <em>with no error</em>. So klart writes, reads back, and keeps trying until the display agrees.</p>
+
+    <h3>Scroll the menu bar icon</h3>
+    <p>A wheel or a trackpad over the icon, without opening anything. It moves every display by the same amount from wherever each one is, so two displays balanced against each other stay balanced.</p>
+
+    <h3>Keep the displays&rsquo; relative brightness</h3>
+    <p>The all-displays slider is absolute by default: every display goes to the level shown. <code>:combined = relative</code> moves them all by the same amount instead, measured from where they were when the menu opened — so a display that pins at one end comes back to where it started rather than quietly losing the difference.</p>
+
+    <h3>The probe names HDR</h3>
+    <p>On Windows, HDR takes brightness control away without saying so. The probe now says so instead of reporting <code>Unclear</code>.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Why this is three mechanisms rather than one</h2>
+    <p class="sub">There is no single brightness API on any of these systems, so there is no single backend here.</p>
+
+    <table>
+      <tr><th>Display</th><th>Mechanism</th></tr>
+      <tr><td>Built-in panel</td><td><code>DisplayServices</code> on macOS, WMI on Windows, <code>/sys/class/backlight</code> on Linux</td></tr>
+      <tr><td>Speaks DDC/CI</td><td>VCP feature <code>0x10</code> — <code>IOAVService</code> I2C on macOS, <code>dxva2</code> on Windows, <code>/dev/i2c-*</code> on Linux</td></tr>
+      <tr><td>Everything else</td><td>A gamma ramp. Darkens the picture rather than the backlight, so it is a fallback rather than a peer. macOS reverts it when the process exits, which is why the agent exists. No equivalent on Linux without a display server.</td></tr>
+    </table>
+
+    <p>Only the platform layer knows which operating system this is. <code>Brightness</code>, the display key, the DDC/CI protocol and the resolution order are written once and shared — which is what makes a configuration file written on macOS name the same monitors on Windows.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What has actually been run</h2>
+    <p class="sub">Worth stating plainly rather than leaving to be discovered.</p>
+
+    <table>
+      <tr><th>Platform</th><th>State</th></tr>
+      <tr><td>macOS</td><td><span class="yes">Menu bar agent and command line, run on real hardware.</span> Apple silicon only.</td></tr>
+      <tr><td>Linux</td><td><span class="no">Command line, compiled and tested by CI, never run.</span></td></tr>
+      <tr><td>Windows</td><td><span class="no">Command line, compiled and tested by CI, never run.</span></td></tr>
+    </table>
+
+    <p>That table is about platforms. Individual features can be newer than the hardware they have been tried on — in 0.3.0, nobody has yet scrolled the menu bar icon, no HDR monitor has seen the HDR verdict, and the wake restore has not been checked across a real suspend. <a href="https://github.com/WertCore/klart/blob/main/PLAN.md">PLAN.md</a> records this per feature, one entry per change, with its own unticked boxes.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>The command line</h2>
+<pre><code>klart list                    <span style="color:#a8a29e"># every display, its level, and how klart reaches it</span>
+klart set 60
+klart down 10 --display LS32
+klart up --all
+klart get --json
+klart probe                   <span style="color:#a8a29e"># why won't this monitor answer?</span>
+klart restore
+klart rename 1 "Desk monitor"
+klart autostart on</code></pre>
+    <p>Commands act on the display holding the menu bar unless told otherwise. <code>--display</code> takes an index, a key, or part of a name.</p>
+    <p>Levels are remembered per display rather than per port, keyed off EDID, so they survive a reconnect — and the file is meant to be edited by hand.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/WertCore/klart">Source</a> ·
+      <a href="https://github.com/WertCore/klart/releases">Releases</a> ·
+      <a href="https://github.com/WertCore/klart/blob/main/PLAN.md">PLAN.md</a> ·
+      <a href="https://github.com/WertCore/klart/issues">Issues</a>
+    </p>
+    <p>klart is Norwegian for &ldquo;bright&rdquo;. Licensed MIT or Apache-2.0, at your option.</p>
+  </div>
+</footer>
+
+</body>
+</html>

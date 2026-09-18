@@ -757,3 +757,38 @@ What is in it, and what is known about each:
 The release notes say which of those have been run against hardware and which
 have not, in the same words, because a release that overstates what has been
 tried is worse than one that ships less.
+
+## 27. A page, and an install that needs no undoing
+
+- [x] Lead the macOS release notes with Homebrew
+- [x] A page at [wertcore.github.io/klart](https://wertcore.github.io/klart/)
+
+The release notes told people to unzip a bundle and then clear its quarantine
+attribute by hand, and did not mention Homebrew at all — even though the tap has
+existed since entry 20 and installs through it need no such step.
+
+**No `--no-quarantine` flag, because there is nothing to pass it to.** That
+option belongs to casks; klart is a formula, and Homebrew's formula downloader
+does not set the attribute. Checked rather than assumed: nothing in
+`/opt/homebrew/bin` on this machine carries `com.apple.quarantine`. The attribute
+comes from browsers and LaunchServices, which is why a zip fetched from the
+releases page needs clearing and a `brew install` does not. The notes now say
+that outright, because "why is there no quarantine step here" is a fair question
+and a reader should not have to wonder whether it was forgotten.
+
+The page is one static file with no build step, no JavaScript and no fonts to
+fetch, served from `docs/` on `main`. It leads with the probe for the reason
+entry 22 gave, and it carries the same platform table the release notes do —
+including the line saying Linux and Windows have never been run. A landing page
+that quietly drops the caveats the rest of the project states is a landing page
+that lies.
+
+One thing the page deliberately does not say: `klart autostart on` is offered
+only under macOS. On Linux the entry it writes has `Exec` pointing at the command
+line rather than an agent, because there is no agent there — so it starts a
+process that prints its help and exits. That is a real defect in the Linux
+autostart, found while writing this and not fixed here; it has its own box below.
+
+- [ ] Linux `autostart` writes a `.desktop` that runs the command line, which
+      exits immediately. It should refuse on a platform with no agent, or say
+      what it is for.
