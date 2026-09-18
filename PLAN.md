@@ -650,3 +650,47 @@ It is still answered, and the distinction does not matter for this question.
 **Unverified.** This compiles and is tested for the decision rule, on Windows CI.
 Nothing here has been run against a Windows machine, let alone one with an HDR
 monitor, and the box above stays unticked until it has.
+
+## 24. Scroll the menu bar icon
+
+- [x] A wheel or a trackpad over the icon changes brightness
+- [ ] Confirm a real scroll over the icon reaches the agent
+
+Opening a menu to move a slider is three actions for a change that is usually one
+step, and the volume and brightness items already in the menu bar have trained
+everyone to expect a wheel to work there.
+
+**Read in the pump rather than through a monitor or a subclass.** The two usual
+ways to get this are a local event monitor, which means taking on `block2`, or
+swizzling the status item button's class to override `scrollWheel:`. Neither is
+needed: the agent's pump already takes every event the application is sent and
+hands it on, so the one place that sees every scroll already exists. A scroll
+over the icon is recognised there and absorbed; everything else passes through
+untouched. Intercepting before `sendEvent:` also means this does not depend on
+the button doing anything with a scroll, which it does not.
+
+Which window, not which coordinates. A status item's button has a window of its
+own, so its number answers "was this over the icon" exactly, and keeps answering
+it when the item moves — which it does whenever anything to its right is added or
+removed.
+
+A wheel reports notches and a trackpad reports points, and the two differ by two
+orders of magnitude; `hasPreciseScrollingDeltas` tells them apart, and treating
+them alike would make one of the two useless. Sub-percent movement is accumulated
+rather than rounded, because rounding each trackpad event on its own rounds
+almost all of them to nothing — which would leave the icon dead for trackpad
+users and working for everyone else.
+
+**This is relative where the menu's combined slider is absolute,** and that is
+not an inconsistency. A slider is a position, and dragging one to 40% means every
+display goes to 40%. A scroll is a nudge from wherever each display already is. A
+wheel that flattened two displays someone had balanced by eye onto the same
+number would be a surprising thing for a wheel to do. Entry 15's argument for
+absolute still holds for the slider and is unchanged.
+
+Verified as far as it goes without a hand on the mouse: the accumulator has three
+tests, and the status item's button resolves to a real window at runtime, which
+is what the match is against. **What is not verified is that a real scroll over
+the icon arrives in the agent's queue carrying that window number** — that needs
+somebody to scroll, and the box stays unticked until they have. The failure mode
+if it does not is that nothing happens, not that something wrong happens.

@@ -23,6 +23,7 @@ compile_error!(
 mod driver;
 mod menu;
 mod request;
+mod scroll;
 mod status;
 mod wake;
 
@@ -89,7 +90,7 @@ fn main() -> ExitCode {
     app.finishLaunching();
 
     loop {
-        pump(&app);
+        pump(&app, &agent, mtm);
 
         // Anything a drag could not land while the menu was open, and then the
         // levels it left behind.
@@ -129,7 +130,12 @@ fn main() -> ExitCode {
 }
 
 /// Waits for one event and hands it to the application.
-fn pump(app: &NSApplication) {
+///
+/// Except a scroll over the status item, which is absorbed here. AppKit has
+/// nothing useful to do with it — the button does not scroll — and passing it on
+/// as well as acting on it would mean the icon both changed the brightness and
+/// flashed its highlight.
+fn pump(app: &NSApplication, agent: &Agent, mtm: MainThreadMarker) {
     let deadline = NSDate::dateWithTimeIntervalSinceNow(IDLE_WAIT);
 
     // SAFETY: called on the main thread, which is where `NSApplication` requires
@@ -143,9 +149,16 @@ fn pump(app: &NSApplication) {
         )
     };
 
-    if let Some(event) = event {
-        app.sendEvent(&event);
+    let Some(event) = event else {
+        return;
+    };
+
+    if let Some(percent) = scroll::over(&event, &agent.item, mtm) {
+        agent.driver.scroll(percent);
+        return;
     }
+
+    app.sendEvent(&event);
 }
 
 /// Asks Core Graphics to say when the displays change.
