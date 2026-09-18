@@ -40,6 +40,12 @@ pub(crate) struct Monitor {
     pub adapter: String,
     /// The raw EDID the driver stored, when it can be found.
     pub edid: Vec<u8>,
+    /// The device instance path, such as `DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256`.
+    ///
+    /// The registry keeps the EDID under it, and WMI names its brightness
+    /// instances after it — which is what lets a brightness call be aimed at one
+    /// particular panel rather than at whichever one WMI lists first.
+    pub instance: Option<String>,
 }
 
 /// Every monitor attached to the machine.
@@ -87,22 +93,26 @@ fn describe(handle: HMONITOR) -> Option<Monitor> {
 
     let adapter = wide_to_string(&info.szDevice);
 
+    let instance = instance_for(&adapter);
+
     Some(Monitor {
         handle,
         rect: info.monitorInfo.rcMonitor,
         primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
-        edid: edid_for(&adapter).unwrap_or_default(),
+        edid: instance
+            .as_deref()
+            .and_then(|path| read_edid(&registry_path(path)))
+            .unwrap_or_default(),
+        instance,
         adapter,
     })
 }
 
-/// The EDID the driver stored for whatever is plugged into an adapter.
+/// The device instance path for whatever is plugged into an adapter.
 ///
-/// `EnumDisplayDevicesW` on the adapter yields the monitor's device instance
-/// path; the EDID sits under that path's `Device Parameters` key. This is the
-/// same block the monitor published over its own connector, kept by the system
-/// rather than read again.
-fn edid_for(adapter: &str) -> Option<Vec<u8>> {
+/// `EnumDisplayDevicesW` on the adapter yields the monitor's device interface
+/// name; the instance path is the same identifiers with different punctuation.
+fn instance_for(adapter: &str) -> Option<String> {
     let mut device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
     device.cb = u32::try_from(size_of::<DISPLAY_DEVICEW>()).ok()?;
 
@@ -122,14 +132,15 @@ fn edid_for(adapter: &str) -> Option<Vec<u8>> {
         return None;
     }
 
-    read_edid(&instance_path(&wide_to_string(&device.DeviceID))?)
+    instance_path(&wide_to_string(&device.DeviceID))
 }
 
-/// Turns an interface name into the registry path its parameters live under.
+/// Turns a device interface name into a device instance path.
 ///
 /// `EnumDisplayDevicesW` hands back something like
-/// `\\?\DISPLAY#SAM71E3#5&...#{e6f07b5f-...}`. The registry wants
-/// `DISPLAY\SAM71E3\5&...` — the same identifiers, a different punctuation.
+/// `\\?\DISPLAY#SAM71E3#5&...#{e6f07b5f-...}`. Everything else wants
+/// `DISPLAY\SAM71E3\5&...` — the same identifiers, different punctuation, and
+/// without the device interface class at the end.
 fn instance_path(interface: &str) -> Option<String> {
     let trimmed = interface.strip_prefix(r"\\?\")?;
     // The trailing brace is the device interface class, which is not part of the
@@ -138,10 +149,12 @@ fn instance_path(interface: &str) -> Option<String> {
     if without_class.len() < 3 {
         return None;
     }
-    Some(format!(
-        r"SYSTEM\CurrentControlSet\Enum\{}\Device Parameters",
-        without_class.join("\\")
-    ))
+    Some(without_class.join("\\"))
+}
+
+/// Where the driver stored a device's EDID.
+fn registry_path(instance: &str) -> String {
+    format!(r"SYSTEM\CurrentControlSet\Enum\{instance}\Device Parameters")
 }
 
 fn read_edid(path: &str) -> Option<Vec<u8>> {
@@ -239,15 +252,17 @@ mod tests {
     }
 
     #[test]
-    fn an_interface_name_becomes_the_registry_path_the_edid_lives_under() {
+    fn an_interface_name_becomes_the_instance_path_everything_else_wants() {
         let interface =
             r"\\?\DISPLAY#SAM71E3#5&1a2b3c4d&0&UID256#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
 
         assert_eq!(
             instance_path(interface).as_deref(),
-            Some(
-                r"SYSTEM\CurrentControlSet\Enum\DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256\Device Parameters"
-            )
+            Some(r"DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256")
+        );
+        assert_eq!(
+            registry_path(r"DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256"),
+            r"SYSTEM\CurrentControlSet\Enum\DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256\Device Parameters"
         );
     }
 
