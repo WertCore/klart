@@ -735,3 +735,25 @@ connect to anything.
 Verified against the real configuration file: the setting round-trips, an
 unreadable value and an unknown setting each produce one complaint and change
 nothing.
+
+## 26. v0.3.0
+
+- [x] Tag and release all three platforms
+
+Minor rather than patch: four new behaviours, and the public surface grew. Minor
+rather than major even though `Verdict` gained a variant and would break an
+exhaustive match downstream — before 1.0 that is what a minor bump is for, and
+nothing outside this repository matches on it yet.
+
+What is in it, and what is known about each:
+
+| | verified |
+| --- | --- |
+| Levels go back after a sleep | plumbing, on this machine; not across a real suspend |
+| Scrolling the menu bar icon | the accumulator, and that the status item resolves to a window; not a real scroll |
+| `:combined = relative` | round-trips through the real configuration file |
+| An HDR verdict in `probe` | the decision rule, on the Windows runner; no HDR hardware |
+
+The release notes say which of those have been run against hardware and which
+have not, in the same words, because a release that overstates what has been
+tried is worse than one that ships less.

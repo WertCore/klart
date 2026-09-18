@@ -134,7 +134,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "klart-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "klart-core",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "klart-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "objc2",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "klart-tray"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "klart-core",
  "objc2",
