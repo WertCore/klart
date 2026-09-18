@@ -332,3 +332,28 @@ own state in the menu and on the command line.
 It lives in `core` rather than in the agent, even though the agent is what gets
 launched, because `klart` has no settings window and the command line is where its
 settings live. Both binaries sit in the same bundle, so either can register it.
+
+## 15. One slider for all of them
+
+- [x] A combined row above the per-display ones, when there is more than one
+
+Every comparator has this and it is the commonest thing anyone wants from such a
+menu: dim everything, now.
+
+Absolute rather than relative. Moving each display by the same delta would
+preserve whatever balance had been set between them, which is the nicer property
+right up until one saturates and the balance is silently lost anyway — and it
+needs a drag origin to be captured and held, which a continuous action does not
+hand you. Setting them all to the level asked for is predictable at every point
+in the range, and predictable wins in a control someone drags.
+
+It starts at the mean of the displays' levels. Any single display's level would
+be an arbitrary choice and a fixed position would jump the moment it was touched.
+
+The held-back value is one value rather than one per display, because the last
+position of a drag is what was chosen and it is the same for all of them.
+
+Worth noting for review: both places that write to every display use an explicit
+loop rather than `all`, which short circuits — it would have landed the level on
+the first display and dropped it for the rest. Clippy suggested exactly that
+change and the note attached to its own lint is what caught it.
