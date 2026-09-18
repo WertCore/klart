@@ -8,13 +8,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Each platform builds its own artefact and a last job gathers them. Splitting
+# it that way is not tidiness: a cross-compiled binary is one nothing has run
+# the tests against, and the point of shipping Linux and Windows at all is that
+# somebody can run them.
 jobs:
-  bundle:
-    name: Bundle and release
+  macos:
+    name: macOS (arm64)
     runs-on: macos-latest
-    permissions:
-      # To create the release and attach the archive to it.
-      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -26,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # A tag can point at any commit, including one that never went through a
-      # pull request. Running the same gates here is half a minute against the
+      # pull request. Running the gates here is half a minute against the
       # alternative of a release built from a tree nothing checked.
       - name: Gates
         run: |
@@ -57,27 +58,125 @@ jobs:
           set -euo pipefail
           # `ditto` rather than `zip`: it is what preserves a bundle's structure
           # and permissions on macOS, and what Apple's own instructions use.
-          ditto -c -k --keepParent dist/Klart.app "dist/Klart-${{ steps.bundle.outputs.version }}-arm64.zip"
+          ditto -c -k --keepParent dist/Klart.app \
+            "dist/klart-${{ steps.bundle.outputs.version }}-macos-arm64.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-arm64
+          path: dist/*.zip
+
+  linux:
+    name: Linux (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `klart-tray` is AppKit and says so, so the portable half is named
+      # explicitly. The tests run here rather than being taken on trust from
+      # another platform's run.
+      - name: Gates
+        run: |
+          set -euo pipefail
+          cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
+          cargo test -p klart-core -p klart-cli --all-features
+
+      - name: Build and archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          cargo build --release -p klart-cli
+          mkdir -p dist
+          # `tar` preserves the executable bit, which a zip on Linux does not.
+          tar -C target/release -czf "dist/klart-${version}-linux-x86_64.tar.gz" klart
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-x86_64
+          path: dist/*.tar.gz
+
+  windows:
+    name: Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Gates
+        run: |
+          cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
+          cargo test -p klart-core -p klart-cli --all-features
+
+      - name: Build and archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          cargo build --release -p klart-cli
+          mkdir -p dist
+          # Zip rather than tar: Explorer opens one without a third-party tool
+          # and not the other.
+          7z a "dist/klart-${version}-windows-x86_64.zip" ./target/release/klart.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x86_64
+          path: dist/*.zip
+
+  release:
+    name: Release
+    needs: [macos, linux, windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      # To create the release and attach the archives to it.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artefacts
 
       - name: Release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             --notes-file - \
-            "dist/Klart-${{ steps.bundle.outputs.version }}-arm64.zip" <<'NOTES'
-          ## Installing
+            artefacts/*/* <<'NOTES'
+          ## What runs where
 
-          Unzip and move `Klart.app` to `/Applications`.
+          | | state |
+          | --- | --- |
+          | **macOS** | menu bar agent and command line, run on real hardware |
+          | **Linux** | command line, compiled and tested by CI, **never run** |
+          | **Windows** | command line, compiled and tested by CI, **never run** |
 
-          The app is **not signed or notarised**, so the first launch is refused:
-          macOS quarantines anything downloaded from a browser. Right-click it and
-          choose Open, or:
+          The menu bar agent is macOS only. A tray elsewhere is StatusNotifierItem
+          over D-Bus or `Shell_NotifyIcon`, which is a new program rather than a
+          build flag.
+
+          ## macOS
+
+          Unzip and move `Klart.app` to `/Applications`. It is **not signed or
+          notarised**, so the first launch is refused — right-click it and choose
+          Open, or:
 
           ```sh
           xattr -dr com.apple.quarantine /Applications/Klart.app
@@ -87,17 +186,47 @@ jobs:
 
           ```sh
           ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
+          klart autostart on   # the agent holds gamma-dimmed displays
           ```
 
-          ## Apple silicon only
+          Apple silicon only: the registry walk that finds a monitor's name and
+          its I2C channel matches a class Intel Macs do not publish.
 
-          The IORegistry walk that finds a monitor's name and its I2C channel
-          matches `AppleCLCD2`, which Intel Macs do not publish. An Intel build
-          would enumerate displays and reach neither hardware mechanism, so there
-          is no point shipping one until that path exists.
+          ## Linux
+
+          ```sh
+          tar xzf klart-*-linux-x86_64.tar.gz
+          ./klart list
+          ```
+
+          Two permissions it will want, and neither is this program's to grant:
+
+          - **external monitors** need read and write on `/dev/i2c-*`, which
+            usually means being in the `i2c` group or a udev rule
+          - **the laptop panel** needs write on
+            `/sys/class/backlight/*/brightness`
+
+          `klart probe` says which mechanism reached which display and why the
+          others did not.
+
+          There is no software fallback on Linux, because a gamma ramp needs a
+          display server. A display neither mechanism reaches reports why rather
+          than being dimmed badly.
+
+          ## Windows
+
+          ```
+          klart.exe list
+          ```
+
+          Unsigned, so SmartScreen will warn on first run.
+
+          ## If something does not work
+
+          `klart probe` exists for that. It reports what was tried, what came
+          back, and what it means — which of four causes, not merely that it
+          failed.
+
+          Linux and Windows have never been run on real hardware. If either
+          misbehaves, the probe output is the thing worth reporting.
           NOTES
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Klart-arm64
-          path: dist/*.zip
