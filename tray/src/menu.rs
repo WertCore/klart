@@ -209,12 +209,9 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         let transient = !control.persists();
         let percent = control.get().map_or(0, |level| level.percent_rounded());
 
-        let heading = label(
-            mtm,
-            &request::heading(control.display().name(), percent, transient),
-        );
+        let heading = label(mtm, &request::heading(control.name(), percent, transient));
         state.items.push(heading);
-        state.names.push(control.display().name().to_owned());
+        state.names.push(control.name().to_owned());
         state.transient.push(transient);
     }
 

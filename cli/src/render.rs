@@ -71,7 +71,7 @@ pub fn warn_about_anything_that_will_not_last(controls: &[&Control]) {
                 "klart: part of {}'s level is being held by its gamma ramp, which macOS puts \
                  back as this command exits — so the change is already gone. Only a process \
                  that keeps running can hold it; `klart-tray` is that process.",
-                control.display().name()
+                control.name()
             );
         }
     }
@@ -89,7 +89,7 @@ pub fn json(controls: &[&Control], indices: &[usize]) {
             json!({
                 "index": index,
                 "id": display.id(),
-                "name": display.name(),
+                "name": control.name(),
                 "key": display.key().as_str(),
                 "kind": match display.kind() {
                     DisplayKind::BuiltIn => "built-in",
@@ -146,7 +146,7 @@ impl Row {
             },
             name: format!(
                 "{}{}",
-                control.display().name(),
+                control.name(),
                 if control.display().is_main() {
                     " (main)"
                 } else {

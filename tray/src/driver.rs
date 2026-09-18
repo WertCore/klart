@@ -84,7 +84,7 @@ impl Driver {
                 continue;
             };
             if let Err(problem) = control.set(level) {
-                eprintln!("klart-tray: {}: {problem}", control.display().name());
+                eprintln!("klart-tray: {}: {problem}", control.name());
             }
         }
     }
@@ -199,7 +199,7 @@ impl Driver {
 
         let level = Brightness::from_percent(f32::from(percent));
         if let Err(problem) = control.set(level) {
-            eprintln!("klart-tray: {}: {problem}", control.display().name());
+            eprintln!("klart-tray: {}: {problem}", control.name());
             return true;
         }
 

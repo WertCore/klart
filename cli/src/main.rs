@@ -63,6 +63,17 @@ enum Command {
     },
     /// Work out why a display will not answer, and what to do about it.
     Probe,
+    /// Call a display something other than what it calls itself.
+    ///
+    /// Two monitors of the same model publish the same name, which is the case
+    /// this exists for.
+    Rename {
+        /// Which display: an index, a key, or part of a name.
+        #[arg(value_name = "INDEX|KEY|NAME")]
+        display: String,
+        /// The new name. Omit it to give the display its own name back.
+        name: Option<String>,
+    },
     /// Show or change whether the menu bar agent starts with the session.
     ///
     /// Worth setting: on a display with no hardware brightness control the level
@@ -178,6 +189,24 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if let Command::Rename { display, name } = &cli.command {
+        let found = controls()?;
+        let chosen = select::resolve(&candidates(&found), &Selection::Named(display.clone()))?;
+
+        let mut remembered = Remembered::load();
+        for index in chosen {
+            let key = found[index].display().key();
+            remembered.rename(key, name.as_deref());
+            println!(
+                "{key} is now {}",
+                name.as_deref()
+                    .map_or_else(|| found[index].display().name(), |given| given)
+            );
+        }
+        remembered.save()?;
+        return Ok(());
+    }
+
     if matches!(cli.command, Command::Probe) {
         render::probe(&klart_core::diagnose()?);
         return Ok(());
@@ -213,8 +242,8 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Up { target, output, .. }
         | Command::Down { target, output, .. } => (target, output),
 
-        // Both return above, before any of this.
-        Command::Probe | Command::Autostart { .. } => {
+        // All three return above, before any of this.
+        Command::Probe | Command::Autostart { .. } | Command::Rename { .. } => {
             unreachable!("these return before a target is needed")
         }
     };
@@ -228,9 +257,8 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
             Command::List { .. }
             | Command::Get { .. }
             | Command::Probe
-            | Command::Autostart { .. } => {
-                continue;
-            }
+            | Command::Autostart { .. }
+            | Command::Rename { .. } => continue,
             Command::Set { percent, .. } => {
                 control.set(Brightness::from_percent(percent.0))?;
             }
@@ -285,7 +313,7 @@ fn candidates(found: &[Control]) -> Vec<Candidate> {
     found
         .iter()
         .map(|control| Candidate {
-            name: control.display().name().to_owned(),
+            name: control.name().to_owned(),
             key: control.display().key().to_string(),
             is_main: control.display().is_main(),
         })
