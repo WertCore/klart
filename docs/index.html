@@ -230,14 +230,15 @@ li { margin-bottom: 0.4rem; }
     <h2>Install</h2>
     <p class="sub">Homebrew covers macOS (Apple silicon) and Linux (x86_64).</p>
 
-<pre><code>brew install wertcore/tap/klart</code></pre>
+<pre><code>brew install wertcore/tap/klart   <span style="color:#a8a29e"># no quarantine, nothing to unblock</span></code></pre>
 
     <p>On macOS, one more line is worth it if any display falls back to software dimming — macOS reverts a gamma ramp the moment the process that set it exits, so the menu bar agent is the thing that holds it:</p>
 
 <pre><code>klart autostart on</code></pre>
 
     <div class="note">
-      <p><strong>No quarantine step, and no flag to pass for it.</strong> <code>--no-quarantine</code> is a cask option; klart is a formula, and Homebrew&rsquo;s formula downloader never sets the attribute. Quarantine is applied by browsers and LaunchServices — which is why a zip downloaded from the releases page needs clearing and this does not.</p>
+      <p><strong>Nothing to clear, and no flag to pass for it.</strong> Homebrew&rsquo;s formula downloader does not set the quarantine attribute, so there is nothing to undo. Quarantine is applied by browsers and LaunchServices — which is why a zip downloaded from the releases page needs clearing and this does not.</p>
+      <p>If you went looking for <code>--no-quarantine</code>: it was a <em>cask</em> option, it was deprecated in October 2025 and the last of it was removed from Homebrew in July 2026. Passing it to Homebrew 7 is <code>Error: invalid option</code>, whether the target is a formula or a cask.</p>
     </div>
 
     <h3>Or the archives</h3>
