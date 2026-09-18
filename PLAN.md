@@ -518,3 +518,58 @@ could not:
 One consequence worth remembering: the formula pins a version and a checksum, so
 every release needs the tap updated. Automating that from the release workflow is
 a reasonable follow-up and is not done.
+
+## 21. Put the levels back after a wake
+
+- [x] Watch for the machine waking and for the screens waking
+- [x] Restore every display, not only the ones on the gamma ramp
+- [x] Retry until the display answers, or until a deadline
+
+A monitor does not reliably keep its brightness across a sleep. Plenty come back
+at full and have to be dimmed again by hand, every morning. The agent is already
+running and already knows what the level was, so it is in a position to put it
+back, and until now it did not: it restored on launch and when a display
+appeared, and a wake is neither.
+
+Two notifications, because there are two sleeps. `NSWorkspaceDidWake` is the
+machine; `NSWorkspaceScreensDidWake` is the displays coming back while the
+machine stayed up, which is what a display sleep timeout produces and is just as
+likely to have reset a monitor. Both set one flag, and the flag is read once a
+pass, so both firing together costs one restore.
+
+**This restore covers every display, where the existing one does not.** That is
+a deliberate split rather than an inconsistency. The restore on launch skips a
+monitor whose backlight persists, because such a monitor keeps its own setting
+and overruling it would undo whatever its buttons had been used for since. Across
+a sleep that argument does not hold — the monitor resetting itself is the whole
+problem, and nobody pressed anything while the machine was asleep. The cost is
+that a monitor adjusted by its own buttons and then slept comes back where klart
+last left it. That is a real regression for somebody and it is the lesser one:
+what klart restores is also a level the person chose, and it is the most recent
+one it can see.
+
+The part that is easy to get wrong, and that makes this feature usually get
+reported as broken rather than missing: **a display does not answer the moment
+the machine wakes.** The link comes back before the scaler behind it, and in that
+window a write is accepted and dropped with no error — indistinguishable from
+success at the point of writing. So a restore is not a write. It is a write
+followed by a read-back, repeated every half second until the display agrees or
+fifteen seconds pass. A display that will never answer stops being asked, and
+says so once rather than thirty times.
+
+The read-back allows two percent of slack, because a monitor whose range is not
+a hundred quantises: 40% of a range of 64 is stored as 26 and reads back as 41%.
+That is the display agreeing.
+
+The clock lives on the restore rather than in the loop driving it, so the rules
+about when to try again and when to give up are tested against synthetic instants
+rather than against a monitor that has to be asleep to be interesting.
+
+Verified on this machine as far as it can be without sleeping it: the observer
+registers, and posting both notifications by hand reaches the selector and raises
+the flag. The behaviour across a real suspend is not verified here.
+
+One thing the selector arrangement cannot check at compile time is that the name
+`define_class!` registers and the name handed to the notification centre are the
+same string. They are checked at registration instead, because the alternative
+symptom is an unrecognized selector hours later that reads as a crash on resume.
