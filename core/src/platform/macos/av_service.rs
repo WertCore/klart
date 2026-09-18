@@ -15,14 +15,11 @@ use std::sync::OnceLock;
 
 use objc2_core_foundation::{CFRetained, CFType};
 
-use crate::sys::ioreg::IoObject;
+use super::ioreg::IoObject;
 
 /// IOKit's full path. Already loaded in this process, so this resolves to the
 /// handle that is open rather than mapping a second copy.
 const FRAMEWORK: &str = "/System/Library/Frameworks/IOKit.framework/IOKit";
-
-/// The name used in errors and in machine-readable output.
-pub(crate) const NAME: &str = "DDC/CI";
 
 type CreateWithService = unsafe extern "C" fn(*const c_void, IoObject) -> *mut CFType;
 type ReadI2C = unsafe extern "C" fn(*const CFType, u32, u32, *mut c_void, u32) -> i32;

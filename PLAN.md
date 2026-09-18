@@ -102,13 +102,49 @@ until the menu closes. The first attempt queued the values, which meant they all
 landed at once afterwards and the rate limiter kept the first — so the display
 jumped to wherever the drag started and looked as though nothing had happened.
 
-## 8. Remember the levels
+## 8. Make the core portable
+
+- [x] `platform`, one module per operating system chosen by `cfg`, so exactly one
+      compiles into any binary
+- [x] Everything else platform-free: `Brightness`, `DisplayKey`, the DDC/CI
+      protocol, the naming and the resolution bookkeeping
+- [x] `DisplayKey` portable by contract rather than by coincidence
+
+Ahead of entry 9 rather than after it, because a configuration file that stores
+levels against a key fixes that key's format — and a format settled by whatever
+macOS happened to publish is not one another operating system can meet.
+
+So the key's derivation is written down as seven numbered rules on
+`DisplayKey::of`, and each rule has a test named after it. Every input is an EDID
+field, which is the display's own and not the operating system's: macOS reads it
+through the IORegistry, Linux through `/sys/class/drm/*/edid`, Windows through
+SetupAPI. Two of the rules exist only for portability — a printed serial is
+trimmed and confined to a safe character set, because EDID strings are padded and
+terminated differently by different readers and two platforms reading the same
+panel must still arrive at the same bytes.
+
+The DDC/CI protocol turned out to be portable in its entirety. Only the transport
+is not, so the framing, the checksums, the reply validation and the retries moved
+to `ddc`, behind a `Link` trait that is four lines wide. Its nine tests no longer
+need a Mac to run.
+
+The seam is two functions: `platform::displays` and `platform::open`. The order
+mechanisms are tried in sits inside the platform rather than above it, because it
+is not the same list everywhere — Windows has two hardware paths and neither is
+`DisplayServices`.
+
+This entry also deleted the gamma panic button. Entry 5 measured that macOS puts
+a ramp back when the process that set it exits, `SIGKILL` included, so there was
+nothing left for it to do; it survived only because it was still exported. The
+restructure is what made that visible.
+
+## 9. Remember the levels
 
 - [ ] Per-display levels in `~/Library/Application Support/klart`
 - [ ] Restore on launch and on reconnect, keyed by the stable key from entry 2
 - [ ] Global hotkeys for brighter and dimmer across every display at once
 
-## 9. Ship it
+## 10. Ship it
 
 - [ ] A `Klart.app` bundle with `LSUIElement`, so the agent starts without a
       Dock tile

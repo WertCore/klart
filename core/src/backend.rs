@@ -1,19 +1,15 @@
-//! The mechanisms that can actually change a display's brightness.
+//! The interface every mechanism that can change a display's brightness meets.
 //!
-//! Each one is bound to a single display when it is opened, because whether a
-//! mechanism can reach a display is a question with a different answer per
-//! display and answering it once is cheaper than answering it per call.
+//! One trait, and nothing platform-specific. An implementation is bound to a
+//! single display when it is opened, because whether a mechanism can reach a
+//! display is a question with a different answer per display, and answering it
+//! once is cheaper than answering it per call.
+//!
+//! The implementations live in [`crate::platform`], except DDC/CI, whose
+//! protocol is the same everywhere and so lives in [`crate::ddc`].
 
 use crate::Brightness;
 use crate::error::Result;
-
-mod built_in;
-mod ddc;
-mod gamma;
-
-pub use built_in::BuiltIn;
-pub use ddc::Ddc;
-pub use gamma::Gamma;
 
 /// One way of reaching one display's brightness.
 pub trait Backend {

@@ -1,50 +1,64 @@
-//! External monitors, over DDC/CI.
+//! DDC/CI, which is the same protocol everywhere.
 //!
-//! DDC/CI is a request-and-reply protocol carried on the display connector's
-//! I2C pair. The monitor answers at chip address `0x37`; a request names a VCP
-//! feature — `0x10` is brightness — and a reply carries the current value and
+//! A request-and-reply protocol carried on the display connector's I2C pair. The
+//! monitor answers at chip address `0x37`; a request names a VCP feature —
+//! `0x10` is brightness — and a reply carries the current value together with
 //! the maximum the monitor has chosen for it, which is not the same number on
 //! any two models.
 //!
+//! None of that is platform-specific. What differs between macOS, Windows and
+//! Linux is only how the bytes reach the wire, which is [`Link`]. Everything
+//! above it — the framing, the checksums, the validation and the retries — lives
+//! here and is tested without any hardware at all.
+//!
 //! It is also slow and lossy in a way that most buses are not. The
-//! specification's own timings are tens of milliseconds, a monitor that is busy
+//! specification's timings are tens of milliseconds, a monitor that is busy
 //! simply does not answer, and there is no flow control to notice that with. So
-//! every exchange here is retried, and every reply is checked against the
-//! request that prompted it rather than trusted for having arrived.
+//! every exchange is retried, and every reply is checked against the request
+//! that prompted it rather than trusted for having arrived.
 
 use std::thread::sleep;
 use std::time::Duration;
 
 use crate::Brightness;
 use crate::backend::Backend;
-use crate::display::Display;
 use crate::error::{Error, Result};
-use crate::sys::av_service::{self, AvService, NAME};
-use crate::sys::ioreg;
 
-/// The DDC/CI chip address, as `IOAVService` wants it.
-const CHIP_ADDRESS: u32 = 0x37;
+/// The name used in errors and in machine-readable output.
+pub(crate) const NAME: &str = "DDC/CI";
+
+/// The DDC/CI chip address, which every transport needs and none of them
+/// interpret.
+pub(crate) const CHIP_ADDRESS: u32 = 0x37;
 
 /// The offset every DDC/CI message is written at and read from.
-const DATA_ADDRESS: u32 = 0x51;
+pub(crate) const DATA_ADDRESS: u32 = 0x51;
 
-/// The monitor's address on the bus, in the eight-bit form the checksum is
-/// computed over. Not carried in the buffer — `IOAVService` supplies it — but
-/// the monitor still folds it into the checksum, so it has to be folded in here.
+/// The monitor's address on the bus, in the eight-bit form the checksum covers.
+///
+/// Not carried in the buffer — a [`Link`] supplies it — but the monitor still
+/// folds it into the checksum, so it has to be folded in here.
 const DISPLAY_ADDRESS: u8 = 0x6e;
 
 /// The host's address, likewise.
 const HOST_ADDRESS: u8 = 0x51;
 
+/// The host's *receive* address, which is what a reply's checksum is seeded
+/// with.
+///
+/// Not a typo for [`HOST_ADDRESS`]. The asymmetry is in the specification and is
+/// easy to get wrong in a way that shows up only as intermittent rejection.
+const HOST_RECEIVE_ADDRESS: u8 = 0x50;
+
 /// The VCP feature code for luminance.
-const VCP_BRIGHTNESS: u8 = 0x10;
+pub(crate) const VCP_BRIGHTNESS: u8 = 0x10;
 
 const OP_GET: u8 = 0x01;
 const OP_SET: u8 = 0x03;
 const OP_GET_REPLY: u8 = 0x02;
 
 /// The length of a Get VCP Feature reply, including the leading source address.
-const REPLY_LEN: usize = 11;
+pub(crate) const REPLY_LEN: usize = 11;
 
 /// The specification's minimum wait between a request and its reply.
 const REPLY_DELAY: Duration = Duration::from_millis(40);
@@ -60,88 +74,66 @@ const MESSAGE_GAP: Duration = Duration::from_millis(50);
 /// unreachable display take a noticeable time to give up on.
 const ATTEMPTS: usize = 3;
 
-/// An external monitor's brightness, over DDC/CI.
+/// A way of carrying DDC/CI bytes to one display.
 ///
-/// The maximum is read once when the channel is opened and kept, because a
-/// monitor's own scale does not change and asking again would put another
-/// request on a slow bus for every set.
-pub struct Ddc {
-    service: AvService,
+/// The only part of this protocol that differs by platform: `IOAVServiceWriteI2C`
+/// on macOS, an `I2C_RDWR` ioctl on a `/dev/i2c-*` node on Linux. The error is an
+/// `i32` because every one of those reports a different integer and none of them
+/// means anything above this line.
+pub(crate) trait Link {
+    /// Puts a message on the bus.
+    fn write(&self, bytes: &[u8]) -> std::result::Result<(), i32>;
+
+    /// Fills a buffer from the bus.
+    fn read(&self, into: &mut [u8]) -> std::result::Result<(), i32>;
+}
+
+/// A display's brightness over DDC/CI, on whatever link reaches it.
+///
+/// The maximum is read once when this is opened and kept, because a monitor's
+/// own scale does not change and asking again would put another request on a
+/// slow bus for every set.
+pub(crate) struct Ddc<L: Link> {
+    link: L,
     maximum: u16,
     display: String,
 }
 
-impl std::fmt::Debug for Ddc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ddc")
-            .field("display", &self.display)
-            .field("maximum", &self.maximum)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Ddc {
-    /// Opens the I2C channel to a display and confirms it answers about
-    /// brightness.
+impl<L: Link> Ddc<L> {
+    /// Opens a link and confirms the display answers about brightness.
     ///
-    /// The confirmation is the point. A display having a channel does not mean
-    /// it speaks DDC/CI — the built-in panel has one and answers nothing, and
-    /// plenty of adaptors carry the wires without carrying the protocol. The
-    /// only reliable test is to ask it something and see whether it replies.
+    /// The confirmation is the point. A display having a link does not mean it
+    /// speaks DDC/CI — a built-in panel has one and answers nothing, and plenty
+    /// of adaptors carry the wires without carrying the protocol. The only
+    /// reliable test is to ask something and see whether a reply comes back.
     ///
     /// # Errors
     ///
-    /// Fails if the private calls are missing, if the display has no registry
-    /// node or no channel on it, and if it does not answer a brightness request
-    /// — which is the ordinary answer for the built-in panel, and how the caller
-    /// knows to try something else.
-    pub fn open(display: &Display) -> Result<Self> {
-        if !av_service::available() {
-            return Err(Error::MechanismUnavailable { mechanism: NAME });
-        }
-
-        let cannot_reach = || Error::CannotReach {
+    /// [`Error::CannotReach`] when the display does not answer, which is the
+    /// ordinary case rather than an exceptional one.
+    pub(crate) fn open(link: L, display: &str) -> Result<Self> {
+        let reading = read_feature(&link, VCP_BRIGHTNESS).ok_or_else(|| Error::CannotReach {
             mechanism: NAME,
-            display: display.key().to_string(),
-        };
-
-        let edid = display.edid();
-        let nodes = ioreg::display_nodes();
-        let node = ioreg::node_for(&nodes, edid.vendor, edid.model, edid.serial)
-            .ok_or_else(cannot_reach)?;
-        let channel = node.av_service.as_ref().ok_or_else(cannot_reach)?;
-
-        let service = AvService::open(channel.raw()).ok_or_else(cannot_reach)?;
-
-        let reading = read_feature(&service, VCP_BRIGHTNESS).ok_or_else(cannot_reach)?;
+            display: display.to_owned(),
+        })?;
 
         Ok(Self {
-            service,
+            link,
             maximum: reading.maximum,
-            display: display.key().to_string(),
+            display: display.to_owned(),
         })
-    }
-
-    /// The scale this monitor chose for its own brightness.
-    ///
-    /// Reported because it varies — 100 is common, so is 255, and so is 65535 —
-    /// and because a monitor that reports zero is one that does not really
-    /// support the control.
-    #[must_use]
-    pub fn maximum(&self) -> u16 {
-        self.maximum
     }
 }
 
-impl Backend for Ddc {
+impl<L: Link> Backend for Ddc<L> {
     fn name(&self) -> &'static str {
         NAME
     }
 
     fn get(&self) -> Result<Brightness> {
-        read_feature(&self.service, VCP_BRIGHTNESS)
+        read_feature(&self.link, VCP_BRIGHTNESS)
             .map(|reading| Brightness::from_range(reading.current, reading.maximum))
-            .ok_or(Error::NoReply {
+            .ok_or_else(|| Error::NoReply {
                 mechanism: NAME,
                 display: self.display.clone(),
                 attempts: ATTEMPTS,
@@ -152,14 +144,14 @@ impl Backend for Ddc {
         let frame = set_request(VCP_BRIGHTNESS, level.to_range(self.maximum));
 
         // A set is unacknowledged: DDC/CI has no reply to a Set VCP Feature, so
-        // there is nothing to check and nothing to retry against. A write that
-        // the bus itself rejects is still worth repeating.
+        // there is nothing to check and nothing to retry against. A write the
+        // bus itself rejects is still worth repeating.
         let mut last = 0;
         for attempt in 0..ATTEMPTS {
             if attempt > 0 {
                 sleep(MESSAGE_GAP);
             }
-            match self.service.write(CHIP_ADDRESS, DATA_ADDRESS, &frame) {
+            match self.link.write(&frame) {
                 Ok(()) => return Ok(()),
                 Err(code) => last = code,
             }
@@ -167,7 +159,7 @@ impl Backend for Ddc {
 
         Err(Error::MechanismFailed {
             mechanism: NAME,
-            call: "IOAVServiceWriteI2C",
+            call: "DDC/CI write",
             code: last,
         })
     }
@@ -175,30 +167,27 @@ impl Backend for Ddc {
 
 /// What a monitor reports about one feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Reading {
-    current: u16,
-    maximum: u16,
+pub(crate) struct Reading {
+    pub current: u16,
+    pub maximum: u16,
 }
 
 /// Asks a monitor for one feature, retrying a bus that drops messages.
-fn read_feature(service: &AvService, feature: u8) -> Option<Reading> {
+fn read_feature<L: Link>(link: &L, feature: u8) -> Option<Reading> {
     let request = get_request(feature);
 
     for attempt in 0..ATTEMPTS {
         if attempt > 0 {
             sleep(MESSAGE_GAP);
         }
-        if service.write(CHIP_ADDRESS, DATA_ADDRESS, &request).is_err() {
+        if link.write(&request).is_err() {
             continue;
         }
 
         sleep(REPLY_DELAY);
 
         let mut reply = [0_u8; REPLY_LEN];
-        if service
-            .read(CHIP_ADDRESS, DATA_ADDRESS, &mut reply)
-            .is_err()
-        {
+        if link.read(&mut reply).is_err() {
             continue;
         }
 
@@ -211,9 +200,9 @@ fn read_feature(service: &AvService, feature: u8) -> Option<Reading> {
 
 /// The checksum a DDC/CI frame carries.
 ///
-/// Computed over the whole frame including the two bus addresses, which
-/// `IOAVService` carries out of band — so they are seeded here rather than
-/// written into the buffer.
+/// Computed over the whole frame including the two bus addresses, which a
+/// [`Link`] carries out of band — so they are seeded here rather than written
+/// into the buffer.
 fn checksum(seed: u8, body: &[u8]) -> u8 {
     body.iter().fold(seed, |sum, byte| sum ^ byte)
 }
@@ -244,11 +233,11 @@ fn decode_reply(feature: u8, frame: &[u8]) -> Option<Reading> {
         return None;
     }
 
-    // The reply's checksum is seeded with the host's *receive* address, 0x50,
-    // rather than the 0x51 it is sent to. This asymmetry is in the specification
-    // and is easy to get wrong in a way that only shows up as intermittent
-    // rejection.
-    if checksum(0x50 ^ DISPLAY_ADDRESS, &frame[1..REPLY_LEN - 1]) != frame[REPLY_LEN - 1] {
+    if checksum(
+        HOST_RECEIVE_ADDRESS ^ DISPLAY_ADDRESS,
+        &frame[1..REPLY_LEN - 1],
+    ) != frame[REPLY_LEN - 1]
+    {
         return None;
     }
 
@@ -293,8 +282,8 @@ mod tests {
     #[test]
     fn a_get_request_is_framed_the_way_the_specification_says() {
         // 0x82 is 0x80 | two data bytes; 0x01 is Get VCP Feature; 0x10 is
-        // luminance. The checksum covers the two bus addresses `IOAVService`
-        // carries out of band: 0x6e ^ 0x51 ^ 0x82 ^ 0x01 ^ 0x10.
+        // luminance. The checksum covers the two bus addresses a `Link` carries
+        // out of band: 0x6e ^ 0x51 ^ 0x82 ^ 0x01 ^ 0x10.
         assert_eq!(get_request(VCP_BRIGHTNESS), [0x82, 0x01, 0x10, 0xac]);
     }
 
@@ -359,17 +348,17 @@ mod tests {
 
     #[test]
     fn a_reply_claiming_a_zero_maximum_is_rejected() {
-        // Monitors report this for controls they do not really implement, and
-        // it would otherwise divide the scale by nothing.
+        // Monitors report this for controls they do not really implement, and it
+        // would otherwise divide the scale by nothing.
         let mut frame = REPLY;
         frame[6] = 0;
         frame[7] = 0;
         frame[10] = 0x96; // 0xf2 ^ 0x64, the byte the old maximum contributed.
         assert_eq!(decode_reply(VCP_BRIGHTNESS, &frame), None);
 
-        // And the rejection is about the maximum rather than the checksum,
-        // which would otherwise reject this frame for the wrong reason and pass
-        // the test anyway.
+        // And the rejection is about the maximum rather than the checksum, which
+        // would otherwise reject this frame for the wrong reason and pass the
+        // test anyway.
         frame[7] = 1;
         frame[10] = 0x97;
         assert!(decode_reply(VCP_BRIGHTNESS, &frame).is_some());
