@@ -246,6 +246,8 @@ li { margin-bottom: 0.4rem; }
     <h3>Or the archives</h3>
     <p>Every release carries a macOS app bundle, a Linux tarball and a Windows zip — <a href="https://github.com/WertCore/klart/releases/latest">on the releases page</a>. A bundle that arrived through a browser <em>is</em> quarantined, and klart is not signed or notarised, so:</p>
 <pre><code>xattr -dr com.apple.quarantine /Applications/Klart.app</code></pre>
+    <p>Or open it once and approve it in System&nbsp;Settings → Privacy &amp; Security, where macOS will be offering an <strong>Open Anyway</strong> button. Right-click and Open used to do this and no longer does — Apple removed that bypass for unsigned applications in macOS&nbsp;15.</p>
+    <p>Neither step exists on the Homebrew path above, which is the argument for taking it.</p>
   </div>
 </section>
 

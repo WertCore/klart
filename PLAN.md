@@ -834,3 +834,26 @@ Developer account.
 - [ ] Sign and notarise the macOS bundle, if an Apple Developer account is ever
       worth its fee here. That, and only that, removes the `xattr` step for
       someone who downloads the zip.
+
+## 29. Right-click and Open has not worked since macOS 15
+
+- [x] Say what actually clears Gatekeeper for the archive
+
+The release notes told anyone using the zip to "right-click it and choose Open".
+Apple removed that bypass for unsigned applications in macOS 15, so on any Mac
+new enough to be reading this it does nothing. The route now is System Settings →
+Privacy & Security, where an **Open Anyway** button appears after the first
+refused launch — or `xattr -dr`, which was already there and still works.
+
+Worth stating alongside it, and now stated: quarantine is a tag rather than a
+ban. Gatekeeper reads it and then decides based on the signature. A notarised
+application is quarantined too and simply opens; klart's bundle is refused
+because it is unsigned, not because of the attribute's presence. That distinction
+is what makes `--no-quarantine`'s removal from Homebrew a non-event for everyone
+whose casks are notarised, which is nearly everyone — and Homebrew replaced its
+one real use, re-approving on every upgrade, with inheriting the approval when
+the signing identity has not changed.
+
+None of it reaches klart, which is a formula: that path never sets the attribute,
+and the tap's CI installs and runs it on a clean macOS runner with no approval
+step anywhere.
