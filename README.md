@@ -71,10 +71,33 @@ control, because macOS reverts a gamma ramp when the process that set it exits.
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per
 change; nothing is ticked there until it has run against real hardware.
 
+## Installing
+
+Take the archive from [releases](https://github.com/WertCore/klart/releases),
+unzip it, and move `Klart.app` to `/Applications`.
+
+It is not signed or notarised, so macOS refuses the first launch of anything that
+arrived through a browser. Right-click it and choose Open, or:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Klart.app
+```
+
+The command line rides along inside the bundle:
+
+```sh
+ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
+```
+
+Apple silicon only. An Intel Mac would enumerate its displays and reach neither
+hardware mechanism, because the registry node both of them are found through is
+one Intel Macs do not publish.
+
 ## Building
 
 ```sh
-cargo build --release
+cargo build --release      # the two binaries
+scripts/bundle.sh          # dist/Klart.app
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` will fetch the
