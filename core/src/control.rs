@@ -10,6 +10,7 @@
 use crate::backend::Backend;
 use crate::display::Display;
 use crate::error::{Error, Result};
+use crate::remembered::Remembered;
 use crate::{Brightness, displays, platform};
 
 /// A display together with the mechanism that reaches it.
@@ -17,12 +18,16 @@ pub struct Control {
     display: Display,
     backend: Box<dyn Backend>,
     refusals: Vec<Error>,
+    /// What the person calls this display, when that is not what it calls
+    /// itself.
+    chosen_name: Option<String>,
 }
 
 impl std::fmt::Debug for Control {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Control")
             .field("display", &self.display)
+            .field("name", &self.name())
             .field("mechanism", &self.backend.name())
             .field("refusals", &self.refusals)
             .finish()
@@ -43,7 +48,20 @@ impl Control {
             display,
             backend,
             refusals,
+            chosen_name: None,
         })
+    }
+
+    /// What to call this display.
+    ///
+    /// The name it was given if it has one, and otherwise the name it publishes
+    /// for itself. Two monitors of the same model publish the same name, which
+    /// is the case this exists for.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        self.chosen_name
+            .as_deref()
+            .unwrap_or_else(|| self.display.name())
     }
 
     /// The display this drives.
@@ -110,11 +128,24 @@ impl Control {
 
 /// Every attached display, each with the mechanism that reaches it.
 ///
+/// Names chosen for a display are applied here rather than in [`displays`],
+/// because a [`Display`] is what the hardware says it is and a [`Control`] is
+/// how a person deals with it.
+///
 /// # Errors
 ///
 /// As [`displays`].
 pub fn controls() -> Result<Vec<Control>> {
-    displays()?.into_iter().map(Control::open).collect()
+    let chosen = Remembered::load();
+
+    displays()?
+        .into_iter()
+        .map(|display| {
+            let mut control = Control::open(display)?;
+            control.chosen_name = chosen.name_for(control.display().key()).map(str::to_owned);
+            Ok(control)
+        })
+        .collect()
 }
 
 #[cfg(test)]

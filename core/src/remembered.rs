@@ -1,10 +1,14 @@
 //! Levels that outlive the process.
 //!
 //! Small enough to be its own format rather than a library's. The whole file is
-//! a display key, an equals sign and a percentage, one display to a line, and
-//! the keys are constrained by [`DisplayKey`]'s contract to characters that need
-//! no quoting — so a parser is thirty lines and a dependency would be a larger
+//! a display key, an equals sign and a value, one line at a time, and the keys
+//! are constrained by [`DisplayKey`]'s contract to characters that need no
+//! quoting — so a parser is fifty lines and a dependency would be a larger
 //! surface than the thing it parsed.
+//!
+//! A key with `:name` after it is the display's name rather than its level. The
+//! colon is deliberate: it is not in the character set a key can contain, so it
+//! cannot occur inside one and no escaping is needed to tell the two apart.
 //!
 //! It is also meant to be edited by hand, and read on another operating system:
 //! the keys come out of EDID, so a file written on macOS describes the same
@@ -27,17 +31,25 @@ const FILE: &str = "levels.conf";
 
 /// What was written at the top of a file this wrote.
 const PREAMBLE: &str = "\
-# Levels klart will put displays back to.
+# What klart remembers about each display.
 #
-# One display per line, as `key = percent`. The keys are the ones `klart list`
-# prints; they come from the display's EDID, so they mean the same thing on any
-# operating system.
+# `key = percent` is the level to put it back to, and `key:name = ...` is what to
+# call it. The keys are the ones `klart list` prints; they come from the display's
+# EDID, so they mean the same thing on any operating system.
 ";
+
+/// What marks a line as a name rather than a level.
+///
+/// A colon cannot appear in a display key — [`DisplayKey`]'s contract replaces
+/// anything outside `A-Z a-z 0-9 . _ -` — so this can never be ambiguous with
+/// part of a key.
+const NAME_SUFFIX: &str = ":name";
 
 /// The level each display was last left at.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Remembered {
     levels: BTreeMap<String, u8>,
+    names: BTreeMap<String, String>,
     /// Whether anything has changed since this was loaded or saved.
     dirty: bool,
 }
@@ -65,15 +77,38 @@ impl Remembered {
             }
         };
 
-        let (levels, complaints) = parse(&text);
+        let (levels, names, complaints) = parse(&text);
         for complaint in complaints {
             eprintln!("klart: {}: {complaint}", path.display());
         }
 
         Self {
             levels,
+            names,
             dirty: false,
         }
+    }
+
+    /// What this display should be called, if it has been renamed.
+    #[must_use]
+    pub fn name_for(&self, key: &DisplayKey) -> Option<&str> {
+        self.names.get(key.as_str()).map(String::as_str)
+    }
+
+    /// Renames a display, or with [`None`] gives it its own name back.
+    ///
+    /// A name that is only whitespace counts as clearing it, because a display
+    /// with a blank name cannot be picked out of a list.
+    pub fn rename(&mut self, key: &DisplayKey, name: Option<&str>) {
+        let name = name.map(str::trim).filter(|name| !name.is_empty());
+
+        let changed = match name {
+            Some(name) => {
+                self.names.insert(key.as_str().to_owned(), name.to_owned()) != Some(name.to_owned())
+            }
+            None => self.names.remove(key.as_str()).is_some(),
+        };
+        self.dirty |= changed;
     }
 
     /// The level this display was last left at.
@@ -122,7 +157,7 @@ impl Remembered {
         }
 
         let temporary = path.with_extension("conf.new");
-        std::fs::write(&temporary, render(&self.levels))?;
+        std::fs::write(&temporary, render(&self.levels, &self.names))?;
         std::fs::rename(&temporary, &path)?;
 
         self.dirty = false;
@@ -140,8 +175,11 @@ pub fn path() -> Option<PathBuf> {
 }
 
 /// Reads the file's contents, and says what it could not read.
-fn parse(text: &str) -> (BTreeMap<String, u8>, Vec<String>) {
+type Parsed = (BTreeMap<String, u8>, BTreeMap<String, String>, Vec<String>);
+
+fn parse(text: &str) -> Parsed {
     let mut levels = BTreeMap::new();
+    let mut names = BTreeMap::new();
     let mut complaints = Vec::new();
 
     for (number, line) in text.lines().enumerate() {
@@ -165,6 +203,18 @@ fn parse(text: &str) -> (BTreeMap<String, u8>, Vec<String>) {
             continue;
         }
 
+        // A name, which is free text and only has to be trimmed.
+        if let Some(named) = key.strip_suffix(NAME_SUFFIX) {
+            let named = named.trim();
+            let value = value.trim();
+            if named.is_empty() || value.is_empty() {
+                complaints.push(format!("line {}: empty name, ignoring", number + 1));
+            } else {
+                names.insert(named.to_owned(), value.to_owned());
+            }
+            continue;
+        }
+
         match value.trim().parse::<u8>() {
             Ok(percent) if percent <= 100 => {
                 // Last wins. A hand-edited file with a repeated key most likely
@@ -179,17 +229,30 @@ fn parse(text: &str) -> (BTreeMap<String, u8>, Vec<String>) {
         }
     }
 
-    (levels, complaints)
+    (levels, names, complaints)
 }
 
 /// Writes the file's contents.
-fn render(levels: &BTreeMap<String, u8>) -> String {
+fn render(levels: &BTreeMap<String, u8>, names: &BTreeMap<String, String>) -> String {
     let mut text = String::from(PREAMBLE);
+
+    // `BTreeMap`, so the order is the keys' and a file written twice from the
+    // same state is byte-identical.
     for (key, percent) in levels {
-        // `BTreeMap`, so the order is the keys' and a file written twice from
-        // the same state is byte-identical.
         let _ = writeln!(text, "{key} = {percent}");
+        if let Some(name) = names.get(key) {
+            let _ = writeln!(text, "{key}{NAME_SUFFIX} = {name}");
+        }
     }
+
+    // A display that has been renamed but never had a level set still needs its
+    // name written out.
+    for (key, name) in names {
+        if !levels.contains_key(key) {
+            let _ = writeln!(text, "{key}{NAME_SUFFIX} = {name}");
+        }
+    }
+
     text
 }
 
@@ -203,7 +266,7 @@ mod tests {
         levels.insert("builtin".to_owned(), 44);
         levels.insert("SAM-71e3-HNAW900001".to_owned(), 70);
 
-        let (read_back, complaints) = parse(&render(&levels));
+        let (read_back, _, complaints) = parse(&render(&levels, &BTreeMap::new()));
 
         assert_eq!(read_back, levels);
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -217,7 +280,7 @@ mod tests {
         levels.insert("SAM-71e3-00000000#1".to_owned(), 30);
         levels.insert("SAM-71e3-00000000#2".to_owned(), 60);
 
-        let (read_back, complaints) = parse(&render(&levels));
+        let (read_back, _, complaints) = parse(&render(&levels, &BTreeMap::new()));
 
         assert_eq!(read_back, levels);
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -225,7 +288,7 @@ mod tests {
 
     #[test]
     fn comments_and_blank_lines_are_skipped_without_complaint() {
-        let (levels, complaints) = parse("# a note\n\n   \nbuiltin = 10\n");
+        let (levels, _, complaints) = parse("# a note\n\n   \nbuiltin = 10\n");
 
         assert_eq!(levels.get("builtin"), Some(&10));
         assert!(complaints.is_empty(), "{complaints:?}");
@@ -233,7 +296,7 @@ mod tests {
 
     #[test]
     fn whitespace_around_either_side_is_not_part_of_anything() {
-        let (levels, _) = parse("   builtin   =   10   \n");
+        let (levels, _, _) = parse("   builtin   =   10   \n");
         assert_eq!(levels.get("builtin"), Some(&10));
     }
 
@@ -241,7 +304,7 @@ mod tests {
     fn a_file_with_windows_line_endings_reads_the_same() {
         // The whole point of the key contract is that this file crosses between
         // operating systems, so it will meet CRLF sooner or later.
-        let (levels, complaints) = parse("builtin = 10\r\nSAM-1-x = 20\r\n");
+        let (levels, _, complaints) = parse("builtin = 10\r\nSAM-1-x = 20\r\n");
 
         assert_eq!(levels.get("builtin"), Some(&10));
         assert_eq!(levels.get("SAM-1-x"), Some(&20));
@@ -250,7 +313,7 @@ mod tests {
 
     #[test]
     fn a_line_that_makes_no_sense_is_skipped_and_named() {
-        let (levels, complaints) = parse(
+        let (levels, _, complaints) = parse(
             "builtin = 10\n\
              nonsense\n\
              = 40\n\
@@ -273,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_repeated_key_takes_the_last_value() {
-        let (levels, _) = parse("builtin = 10\nbuiltin = 90\n");
+        let (levels, _, _) = parse("builtin = 10\nbuiltin = 90\n");
         assert_eq!(levels.get("builtin"), Some(&90));
     }
 
@@ -320,6 +383,72 @@ mod tests {
                 .level_for(&key)
                 .map(|level| level.percent_rounded()),
             Some(65)
+        );
+    }
+
+    #[test]
+    fn a_name_survives_the_round_trip_alongside_a_level() {
+        let mut levels = BTreeMap::new();
+        levels.insert("builtin".to_owned(), 44);
+        let mut names = BTreeMap::new();
+        names.insert("builtin".to_owned(), "Laptop".to_owned());
+
+        let (read_levels, read_names, complaints) = parse(&render(&levels, &names));
+
+        assert_eq!(read_levels, levels);
+        assert_eq!(read_names, names);
+        assert!(complaints.is_empty(), "{complaints:?}");
+    }
+
+    #[test]
+    fn a_name_is_written_even_for_a_display_with_no_level() {
+        let mut names = BTreeMap::new();
+        names.insert("SAM-1-x".to_owned(), "Desk".to_owned());
+
+        let (_, read_names, _) = parse(&render(&BTreeMap::new(), &names));
+
+        assert_eq!(read_names, names);
+    }
+
+    #[test]
+    fn a_name_may_contain_the_characters_a_key_may_not() {
+        // The value is free text. Only the key side is constrained, which is
+        // what makes the colon safe as the marker.
+        let mut names = BTreeMap::new();
+        names.insert(
+            "builtin".to_owned(),
+            "Desk = the one on the left".to_owned(),
+        );
+
+        let (_, read_names, complaints) = parse(&render(&BTreeMap::new(), &names));
+
+        assert_eq!(
+            read_names.get("builtin").map(String::as_str),
+            Some("Desk = the one on the left"),
+            "splitting on the first `=` is what makes this work"
+        );
+        assert!(complaints.is_empty(), "{complaints:?}");
+    }
+
+    #[test]
+    fn renaming_to_nothing_gives_a_display_its_own_name_back() {
+        let mut remembered = Remembered::default();
+        let key = DisplayKey::of(&crate::identity::Identity {
+            built_in: true,
+            manufacturer: 0,
+            product: 0,
+            serial: 0,
+            printed_serial: None,
+        });
+
+        remembered.rename(&key, Some("Laptop"));
+        assert_eq!(remembered.name_for(&key), Some("Laptop"));
+
+        remembered.rename(&key, Some("   "));
+        assert_eq!(
+            remembered.name_for(&key),
+            None,
+            "a blank name cannot be picked out of a list"
         );
     }
 }
