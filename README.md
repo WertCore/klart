@@ -6,6 +6,16 @@ external monitors alike, from the menu bar or the command line.
 macOS dims the built-in display from the keyboard and leaves every other monitor
 to its own on-screen buttons. `klart` puts all of them on one control.
 
+## Ports
+
+macOS today. The core is arranged so that adding another is a matter of
+implementing `platform::displays` and `platform::open`: `Brightness`, the display
+keys, the DDC/CI protocol and the whole command line are platform-free already.
+
+`DisplayKey` is portable by contract — its derivation is seven numbered rules,
+each with a test, over EDID fields every operating system can read. A
+configuration written on one is meant to be readable on another.
+
 ## Why this is three mechanisms rather than one
 
 There is no single brightness API on macOS, so there is no single backend here.

@@ -1,32 +1,36 @@
-//! Display discovery and brightness control for macOS.
+//! Display discovery and brightness control.
 //!
-//! macOS has no single API that dims every attached panel. The built-in display,
-//! an external monitor on DDC/CI, and a monitor behind a dock that answers
-//! neither are three unrelated mechanisms, and this crate's job is to hide that
-//! behind one vocabulary. [`Brightness`] is the unit that vocabulary is written
-//! in: every backend converts to and from it at its own edge.
+//! No operating system has a single API that dims every attached panel. A
+//! built-in panel, an external monitor on DDC/CI, and a monitor behind an
+//! adaptor that answers neither are three unrelated mechanisms, and this crate's
+//! job is to hide that behind one vocabulary. [`Brightness`] is the unit that
+//! vocabulary is written in: every backend converts to and from it at its own
+//! edge.
 //!
-//! Start at [`displays`], which is the only way to obtain a [`Display`].
+//! Start at [`controls`], which pairs every display with the mechanism that
+//! reaches it, or [`displays`] if the displays are all that is wanted.
+//!
+//! # Layout
+//!
+//! Only `platform` knows what operating system this is. Everything else —
+//! [`Brightness`], [`DisplayKey`], the DDC/CI protocol, the resolution order's
+//! bookkeeping — is written once and shared, which is what makes a port a matter
+//! of implementing two functions rather than a second copy of the crate.
 
 #![deny(missing_docs)]
-
-// The mechanisms this crate is built on — the `DisplayServices` framework and
-// IOKit's `IOAVService` — are macOS-only and have no equivalent elsewhere, so a
-// build for another target would be a silent no-op rather than a port.
-#[cfg(not(target_os = "macos"))]
-compile_error!(
-    "klart drives macOS display services directly and has no backend for other platforms"
-);
 
 mod backend;
 mod brightness;
 mod control;
+mod ddc;
 mod display;
 mod error;
-mod sys;
+mod identity;
+mod platform;
 
-pub use backend::{Backend, BuiltIn, Ddc, Gamma};
+pub use backend::Backend;
 pub use brightness::Brightness;
 pub use control::{Control, controls};
-pub use display::{Bounds, Display, DisplayKey, DisplayKind, displays};
+pub use display::{Bounds, Display, DisplayKind, displays};
 pub use error::{Error, Result};
+pub use identity::DisplayKey;

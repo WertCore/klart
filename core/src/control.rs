@@ -1,15 +1,16 @@
 //! Choosing a mechanism for a display, and driving it.
 //!
-//! Three mechanisms, in a fixed order of preference: the built-in panel's
-//! framework, then DDC/CI, then the gamma ramp. The order is by how real the
-//! result is. The first two move a backlight; the third only darkens the
-//! picture, so it is what is left when nothing better answers rather than a
-//! peer of the other two.
+//! Which mechanism reaches a display, and driving it once one does.
+//!
+//! The order they are tried in belongs to [`crate::platform`], because it is not
+//! the same list on every operating system. What is the same everywhere is the
+//! policy behind it — hardware before software — and what this module adds: the
+//! refusals collected along the way, and the stepping.
 
-use crate::backend::{Backend, BuiltIn, Ddc, Gamma};
+use crate::backend::Backend;
 use crate::display::Display;
 use crate::error::{Error, Result};
-use crate::{Brightness, displays};
+use crate::{Brightness, displays, platform};
 
 /// A display together with the mechanism that reaches it.
 pub struct Control {
@@ -37,33 +38,10 @@ impl Control {
     /// between being listed and being opened — the gamma ramp is available on
     /// any display that exists, which is why it is last.
     pub fn open(display: Display) -> Result<Self> {
-        let mut refusals = Vec::new();
-
-        match BuiltIn::open(&display) {
-            Ok(panel) => {
-                return Ok(Self {
-                    display,
-                    backend: Box::new(panel),
-                    refusals,
-                });
-            }
-            Err(refusal) => refusals.push(refusal),
-        }
-
-        match Ddc::open(&display) {
-            Ok(monitor) => {
-                return Ok(Self {
-                    display,
-                    backend: Box::new(monitor),
-                    refusals,
-                });
-            }
-            Err(refusal) => refusals.push(refusal),
-        }
-
+        let (backend, refusals) = platform::open(&display)?;
         Ok(Self {
-            backend: Box::new(Gamma::open(&display)?),
             display,
+            backend,
             refusals,
         })
     }

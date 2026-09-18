@@ -1,10 +1,10 @@
 //! The built-in panel, through `DisplayServices`.
 
+use super::display_services::{self, NAME};
 use crate::Brightness;
 use crate::backend::Backend;
 use crate::display::Display;
 use crate::error::{Error, Result};
-use crate::sys::display_services::{self, NAME};
 
 /// The built-in panel's brightness, through the `DisplayServices` framework.
 ///

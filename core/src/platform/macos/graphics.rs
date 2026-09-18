@@ -2,8 +2,8 @@
 
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayModelNumber,
-    CGDisplayRestoreColorSyncSettings, CGDisplaySerialNumber, CGDisplayVendorNumber, CGError,
-    CGGetActiveDisplayList, CGGetDisplayTransferByFormula, CGSetDisplayTransferByFormula,
+    CGDisplaySerialNumber, CGDisplayVendorNumber, CGError, CGGetActiveDisplayList,
+    CGGetDisplayTransferByFormula, CGSetDisplayTransferByFormula,
 };
 
 use crate::display::Bounds;
@@ -140,12 +140,4 @@ pub(crate) fn set_transfer_formula(id: CGDirectDisplayID, ramp: Ramp) -> Result<
         });
     }
     Ok(())
-}
-
-/// Puts every display's ramp back to what ColorSync says it should be.
-///
-/// Undoes this crate's dimming on every display at once, which is why it takes
-/// no display: it is the panic button, not an ordinary operation.
-pub(crate) fn restore_colour_sync() {
-    CGDisplayRestoreColorSyncSettings();
 }

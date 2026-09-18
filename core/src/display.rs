@@ -1,10 +1,8 @@
 //! The displays attached to the machine.
 
-use std::fmt;
-
 use crate::error::Result;
-use crate::sys::graphics::{self, CgDisplay};
-use crate::sys::ioreg::{self, DisplayNode, ProductAttributes};
+use crate::identity::{self, DisplayKey, Identity};
+use crate::platform;
 
 /// Whether a display is the machine's own panel or something plugged into it.
 ///
@@ -12,7 +10,7 @@ use crate::sys::ioreg::{self, DisplayNode, ProductAttributes};
 /// public shape rather than an implementation detail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayKind {
-    /// The panel built into a laptop or an iMac.
+    /// The panel built into a laptop or an all-in-one.
     BuiltIn,
     /// Anything plugged in.
     External,
@@ -31,29 +29,6 @@ pub struct Bounds {
     pub height: u32,
 }
 
-/// A display's identity, as stable as the display will allow.
-///
-/// Not the `CGDirectDisplayID`, which macOS reassigns freely: unplug a monitor,
-/// plug it back in, and the identifier is very often a different number. This is
-/// built from what the display says about itself, so that a level stored against
-/// it can be found again tomorrow.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct DisplayKey(String);
-
-impl DisplayKey {
-    /// The key in the form it is written to configuration.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for DisplayKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// One display attached to the machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Display {
@@ -63,26 +38,14 @@ pub struct Display {
     kind: DisplayKind,
     is_main: bool,
     bounds: Bounds,
-    edid: Edid,
-}
-
-/// The EDID numbers that join a display to its registry node.
-///
-/// Carried on every [`Display`] so that a backend opening later can find the
-/// same node without being handed one, which would tie the display's lifetime to
-/// a registry object it has no reason to own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Edid {
-    pub vendor: u32,
-    pub model: u32,
-    pub serial: u32,
+    identity: Identity,
 }
 
 impl Display {
-    /// The `CGDirectDisplayID`, for handing back to the system.
+    /// The operating system's handle for this display.
     ///
-    /// Valid only for as long as this display stays attached; see [`DisplayKey`]
-    /// for the identity that outlives a reconnect.
+    /// Valid only while the display stays attached, and not stable across a
+    /// reconnect; see [`DisplayKey`] for the identity that is.
     #[must_use]
     pub fn id(&self) -> u32 {
         self.id
@@ -106,7 +69,8 @@ impl Display {
         self.kind
     }
 
-    /// Whether this display holds the menu bar.
+    /// Whether this display holds the menu bar, or whatever the platform calls
+    /// its primary display.
     #[must_use]
     pub fn is_main(&self) -> bool {
         self.is_main
@@ -118,157 +82,104 @@ impl Display {
         self.bounds
     }
 
-    /// The numbers that find this display's registry node again.
-    pub(crate) fn edid(&self) -> Edid {
-        self.edid
+    /// What the display published about itself.
+    ///
+    /// How a mechanism finds the display again in whatever registry its platform
+    /// keeps, without the display having to own a handle into one.
+    pub(crate) fn identity(&self) -> &Identity {
+        &self.identity
     }
 }
 
-/// Every display that is on and drawing, in the order Core Graphics returns.
+/// One display, as a platform found it.
 ///
-/// Displays that are asleep or mirrored onto another are left out: they are
-/// online, but they have no desktop of their own and nothing here can usefully
-/// address one.
+/// The boundary between [`crate::platform`] and everything above it. A platform
+/// reports what it can read; naming, keying and disambiguation happen here,
+/// once, so that two platforms cannot drift apart on any of the three.
+pub(crate) struct Found {
+    /// The operating system's handle.
+    pub id: u32,
+    /// What the display publishes about itself.
+    pub identity: Identity,
+    /// The name the display publishes, if the platform could read one.
+    pub name: Option<String>,
+    /// Whether this is the platform's primary display.
+    pub is_main: bool,
+    /// Where it sits on the desktop.
+    pub bounds: Bounds,
+}
+
+/// Every display that is on and drawing.
+///
+/// Displays that are asleep or mirrored onto another are left out: they exist,
+/// but they have no desktop of their own and nothing here can usefully address
+/// one.
 ///
 /// # Errors
 ///
-/// Fails only if Core Graphics refuses to enumerate at all. A display whose name
-/// cannot be found is still returned, under a generated one.
+/// Fails only if the platform refuses to enumerate at all. A display whose name
+/// could not be read is still returned, under a generated one.
 pub fn displays() -> Result<Vec<Display>> {
-    let attached = graphics::active_displays()?;
-    let published = ioreg::display_nodes();
+    Ok(assemble(platform::displays()?))
+}
 
-    let described: Vec<(&CgDisplay, Option<&ProductAttributes>)> = attached
-        .iter()
-        .map(|display| (display, attributes_for(display, &published)))
-        .collect();
-
+/// Turns what a platform found into displays.
+///
+/// Deliberately free of anything platform-specific, and separated from the
+/// reading so that it can be tested against display sets no one has to own.
+fn assemble(found: Vec<Found>) -> Vec<Display> {
     // Keys are settled for the whole set at once, because whether one needs a
     // suffix is a question about the others.
-    let mut identities: Vec<(DisplayKey, Bounds)> = described
+    let mut keys: Vec<(DisplayKey, (i32, i32))> = found
         .iter()
-        .map(|(display, attributes)| (key_for(display, *attributes), display.bounds))
+        .map(|display| {
+            (
+                DisplayKey::of(&display.identity),
+                (display.bounds.x, display.bounds.y),
+            )
+        })
         .collect();
-    disambiguate(&mut identities);
+    identity::disambiguate(&mut keys);
 
-    Ok(described
+    found
         .into_iter()
-        .zip(identities)
-        .map(|((display, attributes), (key, _))| Display {
-            id: display.id,
-            key,
-            name: name_for(display, attributes),
-            kind: if display.is_builtin {
+        .zip(keys)
+        .map(|(display, (key, _))| Display {
+            name: name_for(&display),
+            kind: if display.identity.built_in {
                 DisplayKind::BuiltIn
             } else {
                 DisplayKind::External
             },
+            id: display.id,
+            key,
             is_main: display.is_main,
             bounds: display.bounds,
-            edid: Edid {
-                vendor: display.vendor,
-                model: display.model,
-                serial: display.serial,
-            },
-        })
-        .collect())
-}
-
-/// The attributes of the registry node this display belongs to.
-fn attributes_for<'a>(
-    display: &CgDisplay,
-    published: &'a [DisplayNode],
-) -> Option<&'a ProductAttributes> {
-    ioreg::node_for(published, display.vendor, display.model, display.serial)
-        .map(|node| &node.attributes)
-}
-
-/// The name to show for a display.
-fn name_for(display: &CgDisplay, attributes: Option<&ProductAttributes>) -> String {
-    if let Some(name) = attributes.and_then(|found| found.name.as_deref()) {
-        return name.to_owned();
-    }
-    if display.is_builtin {
-        // The built-in panel publishes no name anywhere in the registry. macOS
-        // itself falls back to "Color LCD", which says no more than this does.
-        return "Built-in Display".to_owned();
-    }
-    match pnp_code(display.vendor) {
-        Some(vendor) => format!("{vendor} Display"),
-        None => format!("Display {}", display.id),
-    }
-}
-
-/// The identity to store settings against.
-fn key_for(display: &CgDisplay, attributes: Option<&ProductAttributes>) -> DisplayKey {
-    if display.is_builtin {
-        // A Mac has exactly one built-in panel and it is not swappable, so
-        // anything more specific would distinguish nothing.
-        return DisplayKey("builtin".to_owned());
-    }
-
-    let vendor = pnp_code(display.vendor).unwrap_or_else(|| format!("{:04x}", display.vendor));
-
-    // The printed serial is preferred over the EDID one because two units of the
-    // same model are far likelier to differ in it.
-    let serial = attributes
-        .and_then(|found| found.alphanumeric_serial.clone())
-        .unwrap_or_else(|| format!("{:08x}", display.serial));
-
-    DisplayKey(format!("{vendor}-{:04x}-{serial}", display.model))
-}
-
-/// Decodes the three-letter manufacturer code EDID packs into fifteen bits.
-///
-/// Five bits a letter, `A` at 1, most significant letter first. Anything that
-/// decodes outside `A..=Z` is not a code at all: a dock that invents an EDID for
-/// a display behind it often gets this wrong, and a garbled string is worse in a
-/// menu than an honest fallback.
-fn pnp_code(vendor: u32) -> Option<String> {
-    let packed = u16::try_from(vendor).ok()?;
-    [(packed >> 10) & 0x1f, (packed >> 5) & 0x1f, packed & 0x1f]
-        .into_iter()
-        .map(|slot| {
-            let letter = u8::try_from(slot).ok()?.checked_add(b'A' - 1)?;
-            letter.is_ascii_uppercase().then_some(char::from(letter))
+            identity: display.identity,
         })
         .collect()
 }
 
-/// Appends a positional suffix to any key that more than one display produced.
-///
-/// Two monitors of the same model with the same printed serial do occur, because
-/// some manufacturers ship every unit with the serial left at zero. Without this
-/// they would share an identity, and whatever was stored against one would be
-/// read back for the other.
-///
-/// The suffix follows screen order, left to right and then top to bottom. That
-/// survives a reboot but not rearranging the displays in System Settings, which
-/// is the best available: the displays are, by construction, publishing nothing
-/// that tells them apart.
-///
-/// Quadratic, over a list that cannot exceed the eight displays a Mac Pro drives.
-fn disambiguate(identities: &mut [(DisplayKey, Bounds)]) {
-    let mut collisions: Vec<DisplayKey> = Vec::new();
-    for (key, _) in identities.iter() {
-        let shared = identities.iter().filter(|(other, _)| other == key).count() > 1;
-        if shared && !collisions.contains(key) {
-            collisions.push(key.clone());
-        }
+/// The name to show for a display.
+fn name_for(found: &Found) -> String {
+    if let Some(name) = found
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_owned();
     }
 
-    for key in collisions {
-        let mut sharing: Vec<usize> = identities
-            .iter()
-            .enumerate()
-            .filter(|(_, (other, _))| *other == key)
-            .map(|(index, _)| index)
-            .collect();
-        sharing.sort_by_key(|&index| (identities[index].1.x, identities[index].1.y));
+    if found.identity.built_in {
+        // A soldered panel usually publishes no name. macOS falls back to
+        // "Color LCD", which says no more than this does.
+        return "Built-in Display".to_owned();
+    }
 
-        for (ordinal, index) in sharing.into_iter().enumerate() {
-            identities[index].0 = DisplayKey(format!("{key}#{}", ordinal + 1));
-        }
+    match identity::pnp_code(found.identity.manufacturer) {
+        Some(maker) => format!("{maker} Display"),
+        None => format!("Display {}", found.id),
     }
 }
 
@@ -276,13 +187,17 @@ fn disambiguate(identities: &mut [(DisplayKey, Bounds)]) {
 mod tests {
     use super::*;
 
-    fn external(vendor: u32, model: u32, serial: u32, x: i32) -> CgDisplay {
-        CgDisplay {
+    fn found(name: Option<&str>, built_in: bool, x: i32) -> Found {
+        Found {
             id: 1,
-            vendor,
-            model,
-            serial,
-            is_builtin: false,
+            identity: Identity {
+                built_in,
+                manufacturer: 0x4c2d,
+                product: 0x71e3,
+                serial: 0,
+                printed_serial: None,
+            },
+            name: name.map(str::to_owned),
             is_main: false,
             bounds: Bounds {
                 x,
@@ -293,149 +208,48 @@ mod tests {
         }
     }
 
-    fn at(x: i32, y: i32) -> Bounds {
-        Bounds {
-            x,
-            y,
-            width: 2560,
-            height: 1440,
-        }
-    }
-
-    #[test]
-    fn it_decodes_the_packed_manufacturer_code() {
-        // The two codes this machine reports: Samsung on the external monitor,
-        // Apple on the built-in panel.
-        assert_eq!(pnp_code(0x4c2d).as_deref(), Some("SAM"));
-        assert_eq!(pnp_code(0x0610).as_deref(), Some("APP"));
-    }
-
-    #[test]
-    fn it_rejects_bit_patterns_that_are_not_three_letters() {
-        assert_eq!(pnp_code(0), None, "slot zero is not a letter");
-        assert_eq!(pnp_code(0xffff), None, "31 is past Z");
-        assert_eq!(
-            pnp_code(0x1_0000),
-            None,
-            "wider than the field EDID gives it"
-        );
-    }
-
-    #[test]
-    fn the_built_in_panel_has_one_fixed_key() {
-        let mut panel = external(0x0610, 0, 0, 0);
-        panel.is_builtin = true;
-        assert_eq!(key_for(&panel, None).as_str(), "builtin");
-    }
-
-    #[test]
-    fn an_external_key_prefers_the_printed_serial() {
-        let attributes = ProductAttributes {
-            alphanumeric_serial: Some("HNAW900001".to_owned()),
-            ..ProductAttributes::default()
-        };
-        assert_eq!(
-            key_for(&external(0x4c2d, 0x71e3, 810_043_474, 0), Some(&attributes)).as_str(),
-            "SAM-71e3-HNAW900001"
-        );
-    }
-
-    #[test]
-    fn an_external_key_falls_back_to_the_edid_serial() {
-        assert_eq!(
-            key_for(&external(0x4c2d, 0x71e3, 0x0c0f, 0), None).as_str(),
-            "SAM-71e3-00000c0f"
-        );
-    }
-
     #[test]
     fn a_published_name_wins_over_any_fallback() {
-        let attributes = ProductAttributes {
-            name: Some("LS32AG55x".to_owned()),
-            ..ProductAttributes::default()
-        };
-        assert_eq!(
-            name_for(&external(0x4c2d, 0x71e3, 1, 0), Some(&attributes)),
-            "LS32AG55x"
-        );
+        assert_eq!(name_for(&found(Some("LS32AG55x"), false, 0)), "LS32AG55x");
+    }
+
+    #[test]
+    fn a_name_that_is_only_padding_is_not_a_name() {
+        assert_eq!(name_for(&found(Some("   "), false, 0)), "SAM Display");
     }
 
     #[test]
     fn a_nameless_external_is_named_after_its_manufacturer() {
-        assert_eq!(name_for(&external(0x4c2d, 1, 1, 0), None), "SAM Display");
+        assert_eq!(name_for(&found(None, false, 0)), "SAM Display");
     }
 
     #[test]
-    fn a_nameless_external_with_no_usable_code_is_named_after_its_id() {
-        assert_eq!(name_for(&external(0, 1, 1, 0), None), "Display 1");
+    fn a_nameless_panel_is_named_for_being_one() {
+        assert_eq!(name_for(&found(None, true, 0)), "Built-in Display");
     }
 
     #[test]
-    fn identical_displays_are_separated_by_screen_order() {
-        let shared = DisplayKey("SAM-71e3-00000000".to_owned());
-        // Listed right-hand first, to show the suffix follows position rather
-        // than the order Core Graphics happened to enumerate in.
-        let mut identities = vec![(shared.clone(), at(2560, 0)), (shared, at(0, 0))];
-
-        disambiguate(&mut identities);
-
-        assert_eq!(identities[1].0.as_str(), "SAM-71e3-00000000#1");
-        assert_eq!(identities[0].0.as_str(), "SAM-71e3-00000000#2");
+    fn a_nameless_external_with_no_usable_code_is_named_after_its_handle() {
+        let mut odd = found(None, false, 0);
+        odd.identity.manufacturer = 0;
+        assert_eq!(name_for(&odd), "Display 1");
     }
 
     #[test]
-    fn displays_that_already_differ_keep_their_keys() {
-        let mut identities = vec![
-            (DisplayKey("builtin".to_owned()), at(-1470, 0)),
-            (DisplayKey("SAM-71e3-HNAW900001".to_owned()), at(0, 0)),
-        ];
+    fn assembling_two_identical_displays_still_gives_them_distinct_keys() {
+        // Neither publishes a serial, so they key the same until position
+        // separates them. Right-hand one listed first.
+        let assembled = assemble(vec![found(None, false, 2560), found(None, false, 0)]);
 
-        disambiguate(&mut identities);
-
-        assert_eq!(identities[0].0.as_str(), "builtin");
-        assert_eq!(identities[1].0.as_str(), "SAM-71e3-HNAW900001");
-    }
-
-    // The three below run against whatever is plugged into the machine. A
-    // headless runner reports no displays at all, so they hold vacuously there
-    // and do their work on a developer's machine — which is the only place the
-    // Core Graphics and IORegistry join can actually be exercised.
-
-    #[test]
-    fn every_attached_display_has_a_distinct_identity() {
-        let attached = displays().expect("Core Graphics should enumerate");
-
-        let mut keys: Vec<&DisplayKey> = attached.iter().map(Display::key).collect();
-        let total = keys.len();
-        keys.sort();
-        keys.dedup();
-
-        assert_eq!(keys.len(), total, "two displays share a key: {attached:#?}");
+        assert_eq!(assembled[1].key().as_str(), "SAM-71e3-00000000#1");
+        assert_eq!(assembled[0].key().as_str(), "SAM-71e3-00000000#2");
     }
 
     #[test]
-    fn every_attached_display_has_a_distinct_identifier() {
-        let attached = displays().expect("Core Graphics should enumerate");
+    fn assembling_reads_the_kind_off_the_identity() {
+        let assembled = assemble(vec![found(None, true, 0), found(Some("x"), false, 100)]);
 
-        let mut ids: Vec<u32> = attached.iter().map(Display::id).collect();
-        let total = ids.len();
-        ids.sort_unstable();
-        ids.dedup();
-
-        assert_eq!(ids.len(), total, "two displays share an id: {attached:#?}");
-    }
-
-    #[test]
-    fn there_is_at_most_one_main_and_one_built_in_display() {
-        let attached = displays().expect("Core Graphics should enumerate");
-
-        let main = attached.iter().filter(|found| found.is_main()).count();
-        assert!(main <= 1, "{main} displays claim to be main: {attached:#?}");
-
-        let built_in = attached
-            .iter()
-            .filter(|found| found.kind() == DisplayKind::BuiltIn)
-            .count();
-        assert!(built_in <= 1, "{built_in} built-in panels: {attached:#?}");
+        assert_eq!(assembled[0].kind(), DisplayKind::BuiltIn);
+        assert_eq!(assembled[1].kind(), DisplayKind::External);
     }
 }

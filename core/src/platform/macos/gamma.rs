@@ -14,11 +14,11 @@
 //! done nothing by the time it returns, and only a resident process can hold a
 //! display dim. [`Backend::persists`] is how a caller finds that out.
 
+use super::graphics::{self, IDENTITY, Ramp};
 use crate::Brightness;
 use crate::backend::Backend;
 use crate::display::Display;
 use crate::error::Result;
-use crate::sys::graphics::{self, IDENTITY, Ramp};
 
 /// The name used in errors and in machine-readable output.
 pub(crate) const NAME: &str = "gamma";
@@ -54,19 +54,6 @@ impl Gamma {
         Ok(Self {
             display: display.id(),
         })
-    }
-
-    /// Puts every display's ramp back to what ColorSync says it should be.
-    ///
-    /// Takes no display because it is the panic button rather than an ordinary
-    /// operation: it undoes this crate's dimming everywhere at once.
-    ///
-    /// Not a shutdown path: macOS already reverts a display's ramp when the
-    /// process that set it exits, `SIGKILL` included. This is for the case where
-    /// something else has left a ramp dark and a caller wants the screens back
-    /// now.
-    pub fn restore_everything() {
-        graphics::restore_colour_sync();
     }
 }
 
