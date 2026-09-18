@@ -81,10 +81,28 @@ change; nothing is ticked there until it has run against real hardware.
 
 ## Installing
 
-Archives for all three platforms are on the
+### Homebrew
+
+```sh
+brew install wertcore/tap/klart
+```
+
+macOS on Apple silicon and Linux on x86_64. That installs the `klart` command
+line, and on macOS the `klart-tray` agent with it:
+
+```sh
+brew services start klart
+```
+
+Use that rather than `klart autostart` for a Homebrew install — that command
+registers an application bundle, and there is no bundle in a Homebrew install.
+
+### The archives
+
+Every platform, including Windows, is on the
 [releases page](https://github.com/WertCore/klart/releases).
 
-### macOS
+#### macOS
 
 Unzip and move `Klart.app` to `/Applications`.
 
@@ -105,7 +123,7 @@ Apple silicon only. An Intel Mac would enumerate its displays and reach neither
 hardware mechanism, because the registry node both of them are found through is
 one Intel Macs do not publish.
 
-### Linux
+#### Linux
 
 ```sh
 tar xzf klart-*-linux-x86_64.tar.gz
@@ -118,7 +136,7 @@ a udev rule, and the laptop panel needs write on
 `/sys/class/backlight/*/brightness`. `klart probe` says which mechanism reached
 which display and why the others did not.
 
-### Windows
+#### Windows
 
 ```
 klart.exe list

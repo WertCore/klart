@@ -488,3 +488,33 @@ anything installed.
 The release notes say plainly which platforms have been run on real hardware and
 which have not, and what permissions Linux will want that this program cannot
 grant itself.
+
+## 20. Homebrew
+
+- [x] A tap at [WertCore/homebrew-tap](https://github.com/WertCore/homebrew-tap)
+- [x] `brew install wertcore/tap/klart`
+
+A tap rather than homebrew-core, which has notability requirements a new project
+does not meet. The formula is the one it would be there.
+
+It installs the released binary rather than building. The first version built
+from source, which pulls the whole Rust toolchain in as a build dependency and
+leaves it on the machine — `brew autoremove` clears it, but few people run that,
+and asking for a gigabyte to produce a four-hundred-kilobyte binary is a poor
+trade. The other half of the argument for building was avoiding macOS quarantine,
+and that was simply wrong: quarantine is set by browsers and LaunchServices, not
+by Homebrew's downloader. Source builds remain available through `--HEAD`, which
+is where the Rust dependency belongs.
+
+Two things the tap's own CI caught, both of which `brew audit` on this machine
+could not:
+
+- the service block pointed at `klart-tray` on Linux, where there is no agent and
+  never will be one in that crate. `service` is not accepted inside `on_macos`,
+  so it is a plain conditional.
+- an archive with a single top-level directory leaves Homebrew already inside it,
+  so `Klart.app/Contents/MacOS/klart` had the bundle in the path twice.
+
+One consequence worth remembering: the formula pins a version and a checksum, so
+every release needs the tap updated. Automating that from the release workflow is
+a reasonable follow-up and is not done.
