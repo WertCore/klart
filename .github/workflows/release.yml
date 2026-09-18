@@ -16,7 +16,7 @@ jobs:
       # To create the release and attach the archive to it.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -97,7 +97,7 @@ jobs:
           is no point shipping one until that path exists.
           NOTES
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Klart-arm64
           path: dist/*.zip
