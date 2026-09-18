@@ -77,10 +77,30 @@ line cannot, and has to say so rather than appear to work.
 
 ## 7. The menu bar
 
-- [ ] A `tray-icon` agent under `NSApplicationActivationPolicyAccessory`, so it
-      has no Dock tile and no window
-- [ ] One submenu per display: presets, a step up and a step down
-- [ ] Re-enumerate when a display is plugged or unplugged
+- [x] An agent under `NSApplicationActivationPolicyAccessory`, so it has no Dock
+      tile and no window
+- [x] One slider per display, applied live as it is dragged
+- [x] Re-enumerate when a display is plugged or unplugged
+
+The plan said "one submenu per display: presets, a step up and a step down",
+built on `tray-icon`. Both changed, for one reason: a brightness menu wants a
+slider, and a slider in a menu is an `NSView` inside an `NSMenuItem`.
+
+`muda`, which `tray-icon` uses for its menus, has no item of that shape. And the
+crate lays a target view over the status item's button which only pops a menu it
+was handed itself, so an `NSMenu` built here was never shown — the icon appeared
+and clicking it did nothing. With the menu native there was no menu bar work
+left for the crate to do, so it is gone, and `muda`, `crossbeam-channel`,
+`once_cell`, `serde` and `thiserror` went with it.
+
+The icon is the `sun.max` system symbol rather than a drawn glyph: it is what
+Control Center uses for the same thing, and it is already a template image.
+
+A drag is applied while the menu is open rather than queued for the event pump.
+AppKit tracks an open menu in a loop of its own, so the pump does not run again
+until the menu closes. The first attempt queued the values, which meant they all
+landed at once afterwards and the rate limiter kept the first — so the display
+jumped to wherever the drag started and looked as though nothing had happened.
 
 ## 8. Remember the levels
 

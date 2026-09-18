@@ -43,6 +43,14 @@ Commands act on the display holding the menu bar unless told otherwise.
 A `*` on the mechanism means the change does not outlive the command — see the
 gamma row of the table above.
 
+## In the menu bar
+
+`klart-tray` puts a sun in the menu bar with a slider per display. It is an
+agent: no Dock tile, no window.
+
+It is also the only way to hold a display dimmed that has no hardware brightness
+control, because macOS reverts a gamma ramp when the process that set it exits.
+
 ## Status
 
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per
