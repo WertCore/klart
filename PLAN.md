@@ -425,3 +425,47 @@ neither mechanism reports why rather than being dimmed badly.
 `klart-tray` is macOS only and says so. A tray on Linux is StatusNotifierItem
 over D-Bus or legacy XEmbed depending on the desktop; that is a new crate rather
 than a `cfg`.
+
+## 18. Windows
+
+- [x] Monitors and their stored EDID, joined on the device instance path
+- [x] External monitors through the Monitor Configuration API
+- [x] The gamma ramp as the fallback
+- [x] Autostart under the `Run` key
+- [x] CI that builds and tests it
+- [ ] Run it on a Windows machine
+- [ ] The laptop panel
+
+**Written, compiled and tested by CI. Never run.**
+
+The pleasant surprise is that this is the easiest of the three. Every mechanism
+is documented, supported public API: `GetMonitorBrightness` and
+`SetMonitorBrightness` are DDC/CI with the driver doing the framing, the
+checksums and the retries — so `crate::ddc`, which macOS and Linux hand-roll, is
+not used on this platform at all. It also reports the monitor's own *minimum* as
+well as its maximum, which nothing else does, and a monitor whose minimum is not
+zero is the case that would otherwise be got quietly wrong.
+
+The join is the same shape of problem macOS has. `EnumDisplayMonitors` gives the
+handle every brightness call takes; the EDID is in the registry under the device
+instance path; nothing connects them directly. `EnumDisplayDevices` bridges the
+two, and the path rewriting it needs is tested.
+
+Two things left out on purpose rather than guessed at.
+
+The **laptop panel** wants the WMI class `WmiMonitorBrightnessMethods`, which
+means COM, which means several hundred lines that cannot be checked from here.
+An internal panel therefore falls through to the gamma ramp: a usable control,
+and not the right one.
+
+**Whether a panel is internal** is not something Windows says outright, so every
+display is reported as external and the mechanism order sorts it out — a panel
+refuses DDC/CI and lands on the ramp, which is where it would have landed anyway.
+
+Unlike macOS, Windows leaves a gamma ramp in place when the process that set it
+exits, so `persists` is true here where it is false there. That is the better
+behaviour for a command line and it falls out of the platform rather than being
+arranged.
+
+The seam guard moved to `aarch64-apple-ios`, because all three desktop platforms
+now have a module and the check needs a target that does not.

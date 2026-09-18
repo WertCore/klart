@@ -33,6 +33,14 @@ pub(crate) use macos::{config_directory, diagnose, displays, open};
 #[cfg(target_os = "macos")]
 pub use macos::{login_item, set_login_item};
 
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(target_os = "windows")]
+pub(crate) use windows::{config_directory, diagnose, displays, open};
+#[cfg(target_os = "windows")]
+pub use windows::{login_item, set_login_item};
+
 // A build for another target would link and silently do nothing, which is worse
 // than not building. The seam above is what a port plugs into.
 //
@@ -40,7 +48,7 @@ pub use macos::{login_item, set_login_item};
 // error a build for a new platform produces. An unresolved import on top of it
 // tells a porter nothing they did not already know and buries the line that
 // does.
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 compile_error!(
     "klart has no platform module for this target yet; see `platform::displays`, \
      `platform::open` and `platform::config_directory`, and PLAN.md"

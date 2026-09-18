@@ -32,6 +32,15 @@ mod brightness;
 )]
 mod combined;
 mod control;
+// The protocol, for platforms that have to speak it themselves. Windows does
+// not: `dxva2` does the framing, the checksums and the retries inside the
+// driver, so nothing there constructs any of this. The module stays in the build
+// on every target because its nine tests are the specification this crate is
+// held to, and they are worth running wherever the code is compiled.
+#[cfg_attr(
+    target_os = "windows",
+    allow(dead_code, reason = "the driver speaks DDC/CI on this platform")
+)]
 mod ddc;
 mod diagnose;
 mod display;

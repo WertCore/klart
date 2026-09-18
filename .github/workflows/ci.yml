@@ -49,7 +49,11 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          target=x86_64-pc-windows-msvc
+          # iOS, because macOS, Linux and Windows all have a platform module now
+          # and this check needs a target that does not. It is an Apple target,
+          # so it gets past the dependency tables and reaches the seam itself,
+          # which is the thing being tested.
+          target=aarch64-apple-ios
           rustup target add "$target"
 
           if output=$(cargo check --target "$target" -p klart-core -p klart-cli 2>&1); then
@@ -64,6 +68,31 @@ jobs:
           fi
 
           echo "$target stops at the seam."
+
+  windows:
+    name: Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `klart-tray` is AppKit and says so, so the portable half is named
+      # explicitly rather than building the workspace.
+      - name: Clippy
+        run: cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test -p klart-core -p klart-cli --all-features
+
+      - name: Docs
+        run: cargo doc -p klart-core -p klart-cli --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   linux:
     name: Linux (x86_64)
