@@ -118,6 +118,7 @@ $ klart up --all
 $ klart get --json
 $ klart restore
 $ klart probe        # why won't this monitor answer? (see above)
+$ klart probe --json # the same, for pasting into an issue
 $ klart autostart on # start the menu bar agent at login
 $ klart rename 1 "Desk monitor"
 ```

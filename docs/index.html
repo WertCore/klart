@@ -295,6 +295,8 @@ process. The difference is the link, not the interface.</code></pre>
     <div class="verdict"><b>HdrInTheWay</b><p>The display is in HDR, and brightness control did not answer. Those go together: an HDR picture mode commonly pins brightness or stops honouring the feature. Windows only.</p></div>
     <div class="verdict"><b>NotApplicable</b> <b>·</b> <b>Unclear</b><p>The built-in panel, which has its own mechanism — or attempts that fit no known pattern, in which case the output above is the evidence.</p></div>
 
+    <p><code>klart probe --json</code> gives the same evidence machine-readably — every attempt, every verdict, and the corroboration — which is the form to paste into a bug report.</p>
+
     <p>The last line of the output is the control, and it is what makes the verdict a measurement rather than a guess. Two displays, the same calls, the same process: if one honours the I2C chip address and the other ignores it, the interface works and the difference is the link.</p>
   </div>
 </section>
@@ -359,6 +361,7 @@ klart down 10 --display LS32
 klart up --all
 klart get --json
 klart probe                   <span style="color:#a8a29e"># why won't this monitor answer?</span>
+klart probe --json            <span style="color:#a8a29e"># the same, for pasting into an issue</span>
 klart restore
 klart rename 1 "Desk monitor"
 klart autostart on</code></pre>

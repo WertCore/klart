@@ -63,7 +63,10 @@ enum Command {
         output: Output,
     },
     /// Work out why a display will not answer, and what to do about it.
-    Probe,
+    Probe {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Call a display something other than what it calls itself.
     ///
     /// Two monitors of the same model publish the same name, which is the case
@@ -208,8 +211,13 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    if matches!(cli.command, Command::Probe) {
-        render::probe(&klart_core::diagnose()?);
+    if let Command::Probe { output } = &cli.command {
+        let reports = klart_core::diagnose()?;
+        if output.json {
+            render::probe_json(&reports);
+        } else {
+            render::probe(&reports);
+        }
         return Ok(());
     }
 
@@ -244,7 +252,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Down { target, output, .. } => (target, output),
 
         // All three return above, before any of this.
-        Command::Probe | Command::Autostart { .. } | Command::Rename { .. } => {
+        Command::Probe { .. } | Command::Autostart { .. } | Command::Rename { .. } => {
             unreachable!("these return before a target is needed")
         }
     };
@@ -257,7 +265,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         match &cli.command {
             Command::List { .. }
             | Command::Get { .. }
-            | Command::Probe
+            | Command::Probe { .. }
             | Command::Autostart { .. }
             | Command::Rename { .. } => continue,
             Command::Set { percent, .. } => {

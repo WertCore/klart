@@ -857,3 +857,47 @@ the signing identity has not changed.
 None of it reaches klart, which is a formula: that path never sets the attribute,
 and the tap's CI installs and runs it on a clean macOS runner with no approval
 step anywhere.
+
+## 30. `klart probe --json`
+
+- [x] The probe's evidence, machine-readably
+
+Entry 22 left this out and said so: the README had offered a flag that did not
+exist, and inventing it on the spot to make the documentation true would have
+been the wrong repair. This is the change it deserved.
+
+It is also the most-asked-for thing found in the comparator survey — `ddcutil`'s
+JSON-output request is the most-reacted feature request of any of them — and it
+compounds the one capability nothing else has. A probe transcript exists to be
+handed to somebody else, and the form somebody else can actually process is the
+one that gets processed.
+
+**An object, where `list --json` is a bare array.** Not an oversight. `list`
+answers "what is attached", which is a list; `probe` answers "what was found",
+which has a conclusion sitting above the per-display detail. The corroboration is
+that conclusion — the two-display comparison that makes `EdidOnly` a measurement
+rather than an assertion — and an array has nowhere to put it.
+
+Three decisions that are only visible from the consuming end:
+
+- **`corroborated` is `null` rather than absent** when there is nothing to
+  compare, which is the ordinary case on a laptop with one monitor. A key that
+  is always there can be read unconditionally.
+- **An attempt carries the same keys whether it worked or not** — `what`, `ok`,
+  `detail`. Naming the field `summary` on success and `error` on failure would
+  make every consumer filtering on `ok` also branch on which field to read.
+- **`kind` uses the same words `list --json` does.** Two vocabularies for one
+  concept across two commands of the same program is a small cruelty.
+
+`Verdict::name` is new and written out by hand rather than taken from `Debug`.
+The moment this string is published, deriving it means renaming a variant
+silently changes a format somebody is parsing. A test pins all eight, and another
+fails to compile if a variant is added without being listed.
+
+The corroboration is now derived once and shared by both renderers. It was
+already the finding the whole probe turns on; the text and the JSON disagreeing
+about it would have been worse than either being wrong alone.
+
+Run against this machine's own displays, and the output parsed back. The case
+this hardware cannot produce — a single display, with no corroboration to
+report — is covered by a test instead.

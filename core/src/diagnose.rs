@@ -98,6 +98,40 @@ pub enum Verdict {
 }
 
 impl Verdict {
+    /// The verdict's name, as `klart probe` prints it.
+    ///
+    /// Written out rather than taken from [`Debug`], because `probe --json`
+    /// publishes this string and a derived one would change silently if a
+    /// variant were ever renamed. A test pins each one.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Answers => "Answers",
+            Self::NotApplicable => "NotApplicable",
+            Self::NoChannel => "NoChannel",
+            Self::NoI2c => "NoI2c",
+            Self::EdidOnly => "EdidOnly",
+            Self::MonitorDeclines => "MonitorDeclines",
+            Self::HdrInTheWay => "HdrInTheWay",
+            Self::Unclear => "Unclear",
+        }
+    }
+
+    /// Every verdict, for a caller that has to cover all of them.
+    #[must_use]
+    pub fn all() -> [Self; 8] {
+        [
+            Self::Answers,
+            Self::NotApplicable,
+            Self::NoChannel,
+            Self::NoI2c,
+            Self::EdidOnly,
+            Self::MonitorDeclines,
+            Self::HdrInTheWay,
+            Self::Unclear,
+        ]
+    }
+
     /// What the person reading this should do about it.
     #[must_use]
     pub fn advice(&self) -> &'static str {
@@ -164,4 +198,70 @@ impl Verdict {
 /// Fails only if the displays cannot be enumerated at all.
 pub fn diagnose() -> Result<Vec<Report>> {
     platform::diagnose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The names `probe --json` publishes.
+    ///
+    /// Spelled out here rather than compared against `Debug`, because the point
+    /// is that renaming a variant must break this test rather than quietly
+    /// change the output somebody is parsing.
+    #[test]
+    fn every_verdict_has_the_name_it_is_published_under() {
+        let names: Vec<&str> = Verdict::all().iter().map(Verdict::name).collect();
+
+        assert_eq!(
+            names,
+            [
+                "Answers",
+                "NotApplicable",
+                "NoChannel",
+                "NoI2c",
+                "EdidOnly",
+                "MonitorDeclines",
+                "HdrInTheWay",
+                "Unclear",
+            ]
+        );
+    }
+
+    /// `all` is written by hand, so nothing but a test stops a new variant being
+    /// left out of it — and leaving one out would silently exclude it from
+    /// whatever `all` is driving.
+    #[test]
+    fn all_covers_every_variant() {
+        // Exhaustive: adding a variant fails to compile here until it is added
+        // to the list below and to `all`.
+        for verdict in Verdict::all() {
+            match verdict {
+                Verdict::Answers
+                | Verdict::NotApplicable
+                | Verdict::NoChannel
+                | Verdict::NoI2c
+                | Verdict::EdidOnly
+                | Verdict::MonitorDeclines
+                | Verdict::HdrInTheWay
+                | Verdict::Unclear => {}
+            }
+        }
+
+        let mut names: Vec<&str> = Verdict::all().iter().map(Verdict::name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Verdict::all().len(), "a name is duplicated");
+    }
+
+    #[test]
+    fn every_verdict_says_what_to_do() {
+        for verdict in Verdict::all() {
+            assert!(
+                !verdict.advice().trim().is_empty(),
+                "{} has no advice",
+                verdict.name()
+            );
+        }
+    }
 }
