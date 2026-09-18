@@ -87,6 +87,12 @@ pub enum Verdict {
     EdidOnly,
     /// The channel reaches the monitor, which will not talk DDC/CI.
     MonitorDeclines,
+    /// The display is in HDR, which is why brightness control is not answering.
+    ///
+    /// Not a fault in the link or the monitor. HDR changes the display pipeline
+    /// underneath brightness control, and a monitor in an HDR picture mode
+    /// commonly pins its brightness or stops honouring the feature entirely.
+    HdrInTheWay,
     /// The answers do not fit any of the above.
     Unclear,
 }
@@ -131,6 +137,16 @@ impl Verdict {
                  monitors ship with it switched off. Look in the on-screen menu under System, \
                  General or Setup for an entry called DDC/CI, Monitor Control, External Control \
                  or PC Control, and turn it on."
+            }
+
+            Self::HdrInTheWay => {
+                "This display is in HDR, and brightness control did not answer. Those two facts \
+                 go together: a monitor in an HDR picture mode commonly pins its brightness to a \
+                 preset or stops honouring the brightness feature at all, and the panel's own \
+                 controls are what set the level instead. Software dimming is not a way around \
+                 it either — Windows does not guarantee gamma ramp behaviour while HDR is on, so \
+                 the fallback may be weakened or ignored as well. Turn HDR off to get brightness \
+                 control back, or set the level in the monitor's own menu and leave it there."
             }
 
             Self::Unclear => {

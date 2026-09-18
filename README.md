@@ -59,6 +59,7 @@ work":
 | --- | --- | --- |
 | `Answers` | DDC/CI is working on this display. | Nothing. |
 | `MonitorDeclines` | Two addresses answered differently, so transactions are reaching the monitor — and it is refusing DDC/CI itself. Most ship with it off. | Turn on DDC/CI, Monitor Control, External Control or PC Control in the monitor's own menu. |
+| `HdrInTheWay` | The display is in HDR, and brightness control did not answer. Those go together: an HDR picture mode commonly pins brightness or stops honouring the feature. Windows only. | Turn HDR off, or set the level in the monitor's own menu. Software dimming is not a way round it — Windows does not guarantee gamma ramp behaviour under HDR either. |
 | `EdidOnly` | The link serves a cached EDID and does no I2C. The monitor is never asked, so this is *not* its DDC/CI setting and no software can change it. | Use a link with no protocol conversion: USB-C to DisplayPort, into the monitor's DisplayPort input. |
 | `NoI2c` | Nothing could be read over this link at all, not even the EDID. Something between the Mac and the monitor is not passing I2C. | A different cable, preferably with no conversion in it. |
 | `NoChannel` | No I2C channel on this machine at all — what a virtual screen looks like: AirPlay, Sidecar, DisplayLink. None carry DDC/CI by design. | Software dimming is the only option, and `klart` falls back to it. |

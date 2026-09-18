@@ -141,7 +141,7 @@ fn instance_for(adapter: &str) -> Option<String> {
 /// `\\?\DISPLAY#SAM71E3#5&...#{e6f07b5f-...}`. Everything else wants
 /// `DISPLAY\SAM71E3\5&...` — the same identifiers, different punctuation, and
 /// without the device interface class at the end.
-fn instance_path(interface: &str) -> Option<String> {
+pub(super) fn instance_path(interface: &str) -> Option<String> {
     let trimmed = interface.strip_prefix(r"\\?\")?;
     // The trailing brace is the device interface class, which is not part of the
     // instance path.

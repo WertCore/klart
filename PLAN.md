@@ -607,3 +607,46 @@ because both would have been believed:
   channel published at all, which is what a virtual screen looks like — AirPlay,
   Sidecar, DisplayLink. `NoI2c` is a channel that reads nothing, not even the
   EDID.
+
+## 23. Name HDR when it is the reason
+
+- [x] Ask Windows whether a display is in HDR, and say so on every probe
+- [x] Turn that into a verdict when brightness control also refused
+- [ ] Run it on a Windows machine with an HDR monitor
+
+HDR takes brightness control away and does not mention it. A monitor in an HDR
+picture mode commonly pins its brightness to a preset or stops honouring the
+brightness feature altogether, and the gamma ramp is no refuge either — Windows
+does not guarantee ramp behaviour while HDR is on. From outside, all of that
+looks like a brightness control that has broken.
+
+Until now the probe said `Unclear` for it, which is true and useless: none of the
+things `Unclear` sends someone off to try are the thing that works.
+
+The query is a different family from the rest of this platform module — not
+`EnumDisplayMonitors` and an `HMONITOR` but the display configuration API, which
+addresses a monitor by adapter LUID and target id. Nothing converts one into the
+other, so the join is the monitor's device path, which is the identifier
+`monitors` already joins the geometry and the registry on. `instance_path` is
+reused rather than reimplemented, so the two halves cannot drift.
+
+Two decisions worth stating, because both are the sort of thing that gets
+quietly reversed:
+
+- **HDR is reported on every probe, not only on failures.** Someone reading a
+  probe wants to know the display is in HDR whether or not it turned out to be
+  the cause.
+- **Only a definite yes becomes the verdict.** The query returns "on", "off", or
+  "could not be read", and the last of those is not evidence of anything.
+  Blaming HDR on the strength of a failed query sends someone to turn off a mode
+  they are not in while the real cause goes unnamed — the same error as ruling it
+  out on the strength of silence. That rule is a function of its own with four
+  tests, because it is the part that would be got wrong.
+
+`DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO` is marked deprecated in
+recent SDKs in favour of a `_2` form that separates HDR from a wide colour gamut.
+It is still answered, and the distinction does not matter for this question.
+
+**Unverified.** This compiles and is tested for the decision rule, on Windows CI.
+Nothing here has been run against a Windows machine, let alone one with an HDR
+monitor, and the box above stays unticked until it has.
