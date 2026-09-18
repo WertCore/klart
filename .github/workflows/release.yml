@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundle:
+    name: Bundle and release
+    runs-on: macos-latest
+    permissions:
+      # To create the release and attach the archive to it.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      # A tag can point at any commit, including one that never went through a
+      # pull request. Running the same gates here is half a minute against the
+      # alternative of a release built from a tree nothing checked.
+      - name: Gates
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+      - name: Bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `v1.2.3` is the tag; `1.2.3` is what goes in Info.plist. A manual run
+          # has no tag, so it takes the version from the manifest.
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            version=""
+          fi
+          ./scripts/bundle.sh $version
+          plutil -lint dist/Klart.app/Contents/Info.plist
+          echo "version=$(plutil -extract CFBundleShortVersionString raw dist/Klart.app/Contents/Info.plist)" >> "$GITHUB_OUTPUT"
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `ditto` rather than `zip`: it is what preserves a bundle's structure
+          # and permissions on macOS, and what Apple's own instructions use.
+          ditto -c -k --keepParent dist/Klart.app "dist/Klart-${{ steps.bundle.outputs.version }}-arm64.zip"
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes-file - \
+            "dist/Klart-${{ steps.bundle.outputs.version }}-arm64.zip" <<'NOTES'
+          ## Installing
+
+          Unzip and move `Klart.app` to `/Applications`.
+
+          The app is **not signed or notarised**, so the first launch is refused:
+          macOS quarantines anything downloaded from a browser. Right-click it and
+          choose Open, or:
+
+          ```sh
+          xattr -dr com.apple.quarantine /Applications/Klart.app
+          ```
+
+          The command line rides along inside the bundle:
+
+          ```sh
+          ln -s /Applications/Klart.app/Contents/MacOS/klart /usr/local/bin/klart
+          ```
+
+          ## Apple silicon only
+
+          The IORegistry walk that finds a monitor's name and its I2C channel
+          matches `AppleCLCD2`, which Intel Macs do not publish. An Intel build
+          would enumerate displays and reach neither hardware mechanism, so there
+          is no point shipping one until that path exists.
+          NOTES
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Klart-arm64
+          path: dist/*.zip

@@ -182,6 +182,23 @@ Not worth guessing at.
 
 ## 11. Ship it
 
-- [ ] A `Klart.app` bundle with `LSUIElement`, so the agent starts without a
+- [x] A `Klart.app` bundle with `LSUIElement`, so the agent starts without a
       Dock tile
-- [ ] A release workflow that builds and attaches it
+- [x] A release workflow that builds and attaches it
+
+The agent sets its own activation policy, which covers being run from a shell.
+`LSUIElement` covers the other case, and it can only live in a bundle — launched
+from Finder without one, macOS gives the agent a Dock tile before any of its code
+runs.
+
+The bundle carries the command line too, so that one download is the whole thing.
+
+Apple silicon only, and not universal. The IORegistry walk that finds a monitor's
+name and its I2C channel matches `AppleCLCD2`, which Intel Macs do not publish:
+an Intel build would enumerate displays and reach neither hardware mechanism.
+Shipping half of a universal binary that is known to be degraded and has never
+been run is worse than shipping one architecture and saying so.
+
+Not signed and not notarised, which means the first launch is refused and the
+release notes have to say how to get past it. Signing needs a paid Developer ID;
+that is a decision about money rather than about code.
