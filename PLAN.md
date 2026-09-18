@@ -140,11 +140,47 @@ restructure is what made that visible.
 
 ## 9. Remember the levels
 
-- [ ] Per-display levels in `~/Library/Application Support/klart`
-- [ ] Restore on launch and on reconnect, keyed by the stable key from entry 2
-- [ ] Global hotkeys for brighter and dimmer across every display at once
+- [x] Per-display levels in `~/Library/Application Support/klart`
+- [x] Restore on launch and on reconnect, keyed by the stable key from entry 2
+- [x] `klart restore` as well, so the feature is usable without the agent
 
-## 10. Ship it
+The automatic restore is deliberately narrower than the explicit one. The agent
+puts back only displays whose mechanism does not persist — which today means
+gamma-dimmed ones, and they are the only displays that genuinely lost anything,
+because macOS wiped the ramp when the last process exited. A monitor whose
+backlight can be moved keeps its own setting through a reconnect and a reboot,
+so there is nothing to restore, and restoring anyway would overrule whatever the
+person did with the brightness keys since. `klart restore` restores everything,
+because there it was asked for rather than assumed.
+
+The file format is its own rather than a library's: a key, an equals sign and a
+percentage, one display to a line. Entry 8's contract already confines keys to
+characters that need no quoting, so a parser is thirty lines and a dependency
+would have been a larger surface than the thing it parsed. Only a *leading* `#`
+is a comment, because a key can contain one — that is how two identical monitors
+are told apart, and treating it as a comment anywhere would silently drop exactly
+those displays.
+
+## 10. Global hotkeys
+
+- [ ] Brighter and dimmer across every display at once
+
+Split out of entry 9 because it is a decision rather than an implementation, and
+the two available answers are not close together.
+
+Registering a chord of `klart`'s own — `RegisterEventHotKey`, in Carbon — needs
+no permission and works the moment it is installed, but the shortcut is invented
+and nobody's fingers know it.
+
+Taking over the Mac's own brightness keys is what someone actually wants, because
+the reason to want this at all is that F1 and F2 do nothing to an external
+monitor. It needs a `CGEventTap`, which needs Accessibility, which means a
+permission dialog, a trip to System Settings, and an agent that silently does
+nothing until that is done.
+
+Not worth guessing at.
+
+## 11. Ship it
 
 - [ ] A `Klart.app` bundle with `LSUIElement`, so the agent starts without a
       Dock tile

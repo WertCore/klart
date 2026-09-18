@@ -61,6 +61,24 @@ pub(crate) fn displays() -> Result<Vec<Found>> {
         .collect())
 }
 
+/// Where configuration belongs on this platform.
+///
+/// `~/Library/Application Support/klart`, as Apple's file system conventions
+/// have it. [`None`] when there is no home directory to hang it off, which
+/// happens in a sandbox and means remembering is simply off.
+pub(crate) fn config_directory() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    if home.is_empty() {
+        return None;
+    }
+    Some(
+        std::path::PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("klart"),
+    )
+}
+
 /// Opens the best mechanism that will have this display.
 ///
 /// In order of how real the result is: the panel's own framework, then DDC/CI,
