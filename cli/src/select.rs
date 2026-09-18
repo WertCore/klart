@@ -10,8 +10,10 @@ use std::fmt;
 /// What the caller asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
-    /// The display holding the menu bar. The default, because a command with no
-    /// target should act on the screen the person is looking at.
+    /// The main display, which on macOS is the one with the menu bar.
+    ///
+    /// The default, because a command with no target should act on the screen
+    /// the person is looking at.
     Main,
     /// Every attached display.
     All,

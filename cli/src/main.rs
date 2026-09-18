@@ -17,9 +17,10 @@ const DEFAULT_STEP: f32 = 10.0;
 #[command(
     name = "klart",
     version,
-    about = "Brightness for every display attached to a Mac",
-    long_about = "Brightness for every display attached to a Mac.\n\n\
-        Commands act on the display holding the menu bar unless told otherwise. \
+    about = "Brightness for every display attached to the machine",
+    long_about = "Brightness for every display attached to the machine.\n\n\
+        Commands act on the main display, which on macOS is the one with the menu \
+        bar, unless told otherwise. \
         `--display` takes an index, a key or part of a name, all as printed by \
         `klart list`."
 )]

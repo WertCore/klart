@@ -1,7 +1,9 @@
 # klart
 
-Brightness control for every display attached to a Mac — the built-in panel and
-external monitors alike, from the menu bar or the command line.
+Brightness control for every display attached to the machine — the built-in
+panel and external monitors alike, from the menu bar or the command line.
+
+[wertcore.github.io/klart](https://wertcore.github.io/klart/)
 
 macOS dims the built-in display from the keyboard and leaves every other monitor
 to its own on-screen buttons. `klart` puts all of them on one control.
@@ -120,7 +122,7 @@ $ klart autostart on # start the menu bar agent at login
 $ klart rename 1 "Desk monitor"
 ```
 
-Commands act on the display holding the menu bar unless told otherwise.
+Commands act on the main display — the one with the menu bar, on macOS — unless told otherwise.
 `--display` takes an index, a key, or part of a name.
 
 A `*` on the mechanism means the change does not outlive the command — see the
