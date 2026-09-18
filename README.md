@@ -6,6 +6,71 @@ external monitors alike, from the menu bar or the command line.
 macOS dims the built-in display from the keyboard and leaves every other monitor
 to its own on-screen buttons. `klart` puts all of them on one control.
 
+And when a monitor will not take one, it tells you why.
+
+## When a monitor will not answer
+
+Some monitors cannot be dimmed over the wire, and the usual answer is a list of
+things to try: another cable, another port, a setting in the on-screen menu, a
+different application. `klart probe` measures instead.
+
+```
+$ klart probe
+LS32AG55x (SAM-71e3-HNAW900001)
+  Core Graphics id 2
+  registry node    matched
+  link             DP -> HDMI
+  I2C channel      published
+  ok               read 128 bytes at the EDID address (0x50): valid EDID header, version 1.3
+  failed           read the same 128 bytes at the DDC/CI address (0x37): byte for byte identical to the EDID address — the chip address is being ignored
+  failed           DDC/CI Get VCP 0x10 (chip 0x37, offset 0x51): 0xe0114102 — sub_iokit_audio_video(0x45), code 258
+
+  EdidOnly
+  This link serves a cached copy of the monitor's EDID and does no I2C:
+  reads return the same bytes whichever address they ask for, and every
+  write is refused. Nothing here ever reaches the monitor, so this is not
+  the monitor's DDC/CI setting and no software can change it — the
+  monitor is never asked. The display coprocessor behaves this way when it
+  cannot run I2C over the link, which is what a DisplayPort-to-HDMI
+  conversion inside a cable or adaptor causes. Use a link with no
+  conversion in it: USB-C to DisplayPort, into the monitor's DisplayPort
+  input.
+
+Built-in Display (builtin)
+  ...
+  ok               read the same 128 bytes at the DDC/CI address (0x37): differs from the EDID address, so the address is honoured
+  ...
+
+  NotApplicable
+  Nothing — the built-in panel has its own mechanism and does not use
+  DDC/CI.
+
+Corroborated on this machine: Built-in Display honoured the I2C chip
+address and LS32AG55x ignored it, through the same calls in the same
+process. The difference is the link, not the interface.
+```
+
+Every line above is something that was attempted, with what came back. The
+verdict at the end is derived from those attempts and nothing else, and it
+distinguishes the cases that otherwise all present as "brightness does not
+work":
+
+| Verdict | What it means | What to do |
+| --- | --- | --- |
+| `Answers` | DDC/CI is working on this display. | Nothing. |
+| `MonitorDeclines` | Two addresses answered differently, so transactions are reaching the monitor — and it is refusing DDC/CI itself. Most ship with it off. | Turn on DDC/CI, Monitor Control, External Control or PC Control in the monitor's own menu. |
+| `EdidOnly` | The link serves a cached EDID and does no I2C. The monitor is never asked, so this is *not* its DDC/CI setting and no software can change it. | Use a link with no protocol conversion: USB-C to DisplayPort, into the monitor's DisplayPort input. |
+| `NoI2c` | Nothing could be read over this link at all, not even the EDID. Something between the Mac and the monitor is not passing I2C. | A different cable, preferably with no conversion in it. |
+| `NoChannel` | No I2C channel on this machine at all — what a virtual screen looks like: AirPlay, Sidecar, DisplayLink. None carry DDC/CI by design. | Software dimming is the only option, and `klart` falls back to it. |
+| `NotApplicable` | The built-in panel, which has its own mechanism. | Nothing. |
+| `Unclear` | The attempts do not fit a known pattern. | The attempts above are the evidence; the `IOReturn` codes are worth an issue. |
+
+The last line of the output is the control, and it is the part that makes the
+verdict a measurement rather than a guess. Two displays, the same calls, the
+same process: if one honours the I2C chip address and the other ignores it, the
+interface works and the difference is the link. Without that comparison,
+`EdidOnly` would be an assertion.
+
 ## Ports
 
 macOS runs and is tested on real hardware. Linux and Windows are written,
@@ -49,7 +114,7 @@ $ klart down 10 --display LS32
 $ klart up --all
 $ klart get --json
 $ klart restore
-$ klart probe        # why won't this monitor answer?
+$ klart probe        # why won't this monitor answer? (see above)
 $ klart autostart on # start the menu bar agent at login
 $ klart rename 1 "Desk monitor"
 ```
@@ -73,6 +138,12 @@ It is also the only way to hold a display dimmed that has no hardware brightness
 control, because macOS reverts a gamma ramp when the process that set it exits —
 which is why `klart autostart on` is worth setting if you have such a display.
 Without it, that display is back at full brightness after every restart.
+
+The agent puts levels back after a sleep. Plenty of monitors come back at full
+brightness of their own accord, and a write sent the instant the machine wakes is
+accepted and dropped — the link returns before the panel behind it does. So the
+agent writes, reads back, and keeps trying for a few seconds until the display
+agrees. A display that never agrees is reported once and left alone.
 
 ## Status
 
