@@ -275,14 +275,17 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         menu.addItem(&keep_offsets_item(mtm, &controller, driver.combined()));
     }
     menu.addItem(&login_item(mtm, &controller));
-    // Only when the brightness keys cannot be taken over, so the feature is
-    // discoverable by its absence rather than silent. When it is working there is
-    // nothing to say — the keys just work.
+    // Only when the keys are not taken over, so the feature is discoverable by
+    // its absence rather than silent. When the tap is working there is nothing to
+    // say — F1/F2 just work. Otherwise point at the chord if it registered, and
+    // at Accessibility either way as the way to get the keys themselves.
     if !crate::keys::trusted() {
-        menu.addItem(&label(
-            mtm,
-            "Brightness keys: grant Accessibility, then relaunch klart",
-        ));
+        let hint = if crate::chord::active() {
+            "Brightness: ⌃⌥↑ / ⌃⌥↓  ·  grant Accessibility for F1/F2, then relaunch"
+        } else {
+            "Brightness keys: grant Accessibility, then relaunch klart"
+        };
+        menu.addItem(&label(mtm, hint));
     }
     menu.addItem(&command(
         mtm,
