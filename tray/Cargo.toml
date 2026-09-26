@@ -37,6 +37,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSFont",
     # `NSBackingStoreType`, for the overlay window.
     "NSGraphics",
+    # The overlay's brightness glyph: the system SF Symbol in an image view.
+    "NSImageView",
     "NSMenu",
     "NSMenuItem",
     "NSImage",

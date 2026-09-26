@@ -18,32 +18,47 @@ use std::time::{Duration, Instant};
 use objc2::MainThreadOnly;
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFont, NSScreen, NSTextAlignment, NSTextField, NSView,
-    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
-    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSFont, NSImage, NSImageScaling, NSImageView, NSScreen,
+    NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
+    NSWindowStyleMask,
 };
 use objc2_core_graphics::CGColor;
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::CALayer;
 
-/// The overlay's size, in points.
+/// The overlay's size, in points. A rounded square, as the system OSD is.
 const WIDTH: f64 = 200.0;
-const HEIGHT: f64 = 82.0;
+const HEIGHT: f64 = 200.0;
 
 /// How round the corners are, matching the system overlay closely enough.
 const CORNER: f64 = 18.0;
 
-/// The segmented bar, as macOS draws it: sixteen cells, filled from the left.
+/// The brightness glyph: the system SF Symbol, filling the upper middle the way
+/// the OSD's does, so it reads as the same thing.
+const GLYPH_SYMBOL: &str = "sun.max.fill";
+const GLYPH_SIZE: f64 = 88.0;
+const GLYPH_Y: f64 = 74.0;
+
+/// The segmented bar, as macOS draws it: sixteen cells, filled from the left,
+/// thin and near the bottom.
 const SEGMENTS: usize = 16;
 /// The bar's inset from the panel's sides, its baseline, and its thickness.
-const BAR_INSET_X: f64 = 20.0;
-const BAR_Y: f64 = 20.0;
-const BAR_HEIGHT: f64 = 12.0;
+const BAR_INSET_X: f64 = 34.0;
+const BAR_Y: f64 = 46.0;
+const BAR_HEIGHT: f64 = 6.0;
 /// The gap between cells and how round each cell is.
 const SEG_GAP: f64 = 3.0;
 const SEG_CORNER: f64 = 2.0;
 /// How bright an unfilled cell is — dim, but present, like the system bar.
 const EMPTY_ALPHA: f64 = 0.30;
+
+/// The percentage, kept small and dim beneath the bar. The system OSD shows no
+/// number; a large one would break the illusion, so this is an unobtrusive
+/// addition rather than the centrepiece.
+const PERCENT_Y: f64 = 18.0;
+const PERCENT_SIZE: f64 = 13.0;
+const PERCENT_ALPHA: f64 = 0.60;
 
 /// How long the overlay stays up after the last press.
 const SHOW_FOR: Duration = Duration::from_millis(1200);
@@ -155,6 +170,9 @@ impl Hud {
         let filled = NSColor::whiteColor().CGColor();
         let empty = NSColor::colorWithWhite_alpha(1.0, EMPTY_ALPHA).CGColor();
 
+        if let Some(glyph) = Self::glyph(mtm) {
+            effect.addSubview(&glyph);
+        }
         let percent = Self::percent_label(mtm);
         let (bar, segments) = Self::segment_bar(mtm, &empty);
         effect.addSubview(&percent);
@@ -171,15 +189,39 @@ impl Hud {
         }
     }
 
-    /// The percentage, large and centred near the top.
+    /// The brightness glyph — the system symbol, tinted white and centred in the
+    /// upper middle. [`None`] on a macOS too old to have SF Symbols, where the
+    /// overlay simply carries the bar and the number.
+    fn glyph(mtm: MainThreadMarker) -> Option<Retained<NSImageView>> {
+        // Returns None if the symbol is unknown, as on a macOS without it.
+        let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+            &NSString::from_str(GLYPH_SYMBOL),
+            None,
+        )?;
+        image.setTemplate(true);
+
+        let view = NSImageView::initWithFrame(
+            NSImageView::alloc(mtm),
+            NSRect::new(
+                NSPoint::new((WIDTH - GLYPH_SIZE) / 2.0, GLYPH_Y),
+                NSSize::new(GLYPH_SIZE, GLYPH_SIZE),
+            ),
+        );
+        view.setImage(Some(&image));
+        view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+        view.setContentTintColor(Some(&NSColor::whiteColor()));
+        Some(view)
+    }
+
+    /// The percentage, small and dim beneath the bar.
     fn percent_label(mtm: MainThreadMarker) -> Retained<NSTextField> {
         let label = NSTextField::labelWithString(&NSString::from_str("0%"), mtm);
         label.setAlignment(NSTextAlignment::Center);
-        label.setFont(Some(&NSFont::boldSystemFontOfSize(30.0)));
-        label.setTextColor(Some(&NSColor::labelColor()));
+        label.setFont(Some(&NSFont::systemFontOfSize(PERCENT_SIZE)));
+        label.setTextColor(Some(&NSColor::colorWithWhite_alpha(1.0, PERCENT_ALPHA)));
         label.setFrame(NSRect::new(
-            NSPoint::new(0.0, 34.0),
-            NSSize::new(WIDTH, 38.0),
+            NSPoint::new(0.0, PERCENT_Y),
+            NSSize::new(WIDTH, PERCENT_SIZE + 6.0),
         ));
         label
     }

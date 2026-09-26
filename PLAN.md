@@ -308,11 +308,13 @@ because the API has no modern replacement that avoids the permission.
       swallows that with the key, so right now the only feedback is the screen
       changing. Enough to be usable, thin for a control people expect a HUD from.
 
-Built in `tray/src/hud.rs`. A single borderless `NSVisualEffectView` window —
-frosted and rounded like the system overlay — with the percentage above a
-sixteen-cell bar drawn the way macOS draws its own (filled cells white, the rest
-dim, one CALayer each rather than a continuous gauge), shown on a key or chord
-press and hidden a beat later. Rather than a timer
+Built in `tray/src/hud.rs`, shaped to pass for the system OSD so it reads as
+inbuilt: a rounded *square* frosted `NSVisualEffectView` window, the system
+`sun.max.fill` SF Symbol filling the upper middle (the same glyph macOS uses),
+the sixteen-cell bar beneath it (filled cells white, the rest dim, one CALayer
+each), and the percentage small and dim below the bar — the OSD shows no number,
+so it is an unobtrusive addition rather than the centrepiece. Shown on a key or
+chord press and hidden a beat later. Rather than a timer
 it hides cooperatively: a press books a deadline, the pump shortens its idle wait
 while the overlay is up and calls `hud::tick()` to take it down, so all the timing
 stays on the one thread the crate already runs on. `Driver::key_step` now returns
