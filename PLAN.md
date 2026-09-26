@@ -238,7 +238,48 @@ monitor. It needs a `CGEventTap`, which needs Accessibility, which means a
 permission dialog, a trip to System Settings, and an agent that silently does
 nothing until that is done.
 
-Not worth guessing at.
+**Decided 2026-09-26: take over the keys.** Two things settled the toss-up. A scan
+of the field — MonitorControl, Lunar, BetterDisplay — found every one of them
+overrides the built-in brightness keys *and* offers a custom chord as a fallback;
+none ships only an invented chord. So the permission cost is table stakes, not a
+differentiator, and shipping only a chord would be the outlier that feels broken
+next to them. And a friend testing klart singled out exactly this behaviour in a
+competitor — keys act on the active display — as the thing he wanted.
+
+So: take over the keys via a `CGEventTap` (Lunar's route, needing Accessibility),
+with a `RegisterEventHotKey` chord kept as the fallback for anyone who declines
+the grant. Target the display under the cursor by default, a modifier for the
+rest — Lunar's proven answer, not a new invention. Drive the existing `Combined`
+backend, so a key press gets DDC-then-gamma including the sub-floor dimming for
+free, and the agent already holds the ramp across the session.
+
+The `CGEventTap` over the HID/`IOHIDManager` route (MonitorControl's, needing
+Input Monitoring) because a tap can *swallow* the event — return null and macOS
+does not also dim the built-in panel — which passive HID observation cannot. That
+choice rests on one machine-dependent unknown, which is what the spike is for.
+
+### Spike: `tray/examples/keys.rs`
+
+- [x] Confirm a session `CGEventTap` is refused without Accessibility
+
+Run and observed 2026-09-26: with the permission ungranted, `tap_create` returns
+`None`. That is the hard gate proven rather than assumed — no grant, no tap, so
+the chord fallback is not optional. The example says so and exits cleanly rather
+than panicking.
+
+- [ ] Confirm a *granted* tap actually receives the brightness keys on this
+      machine, and as what — a key-down (plain F-keys) or a system-defined aux
+      event (media keys). This is the MonitorControl-vs-Lunar question and it is
+      machine-dependent: MonitorControl reaches for HID precisely because a tap
+      does not always see these keys. Interactive — needs Accessibility granted
+      to the terminal and the keys pressed by hand, so it is the user's to run:
+      `cargo run --example keys -p klart-tray`, grant when asked, press F1/F2.
+
+If the tap sees them, swallowing is settled with it: a non-`ListenOnly` tap drops
+an event by returning null, and the example is one line from proving it (left
+undone so it does not make the keys briefly dead under someone's fingers). If the
+tap does *not* see them, the decision above flips to the HID route and Input
+Monitoring, and this entry is why.
 
 ## 11. Ship it
 
