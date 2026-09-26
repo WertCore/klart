@@ -72,7 +72,7 @@ cat > "$contents/Info.plist" <<PLIST
 	<key>LSMinimumSystemVersion</key>
 	<string>11.0</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT or Apache-2.0</string>
+	<string>Apache-2.0</string>
 </dict>
 </plist>
 PLIST
