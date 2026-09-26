@@ -23,9 +23,8 @@ use objc2_app_kit::{
     NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
     NSWindowStyleMask,
 };
-use objc2_core_graphics::CGColor;
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
-use objc2_quartz_core::CALayer;
+use objc2_quartz_core::{CALayer, CATransaction};
 
 /// The overlay's size, in points. A rounded square, as the system OSD is.
 const WIDTH: f64 = 200.0;
@@ -40,17 +39,13 @@ const GLYPH_SYMBOL: &str = "sun.max.fill";
 const GLYPH_SIZE: f64 = 88.0;
 const GLYPH_Y: f64 = 74.0;
 
-/// The segmented bar, as macOS draws it: sixteen cells, filled from the left,
-/// thin and near the bottom.
-const SEGMENTS: usize = 16;
-/// The bar's inset from the panel's sides, its baseline, and its thickness.
-const BAR_INSET_X: f64 = 34.0;
+/// The bar, as macOS draws it now: a single continuous track with a bright fill,
+/// both fully rounded, thin and near the bottom. (The old segmented look was
+/// pre-2020; the current OSD is continuous.)
+const BAR_INSET_X: f64 = 32.0;
 const BAR_Y: f64 = 46.0;
-const BAR_HEIGHT: f64 = 6.0;
-/// The gap between cells and how round each cell is.
-const SEG_GAP: f64 = 3.0;
-const SEG_CORNER: f64 = 2.0;
-/// How bright an unfilled cell is — dim, but present, like the system bar.
+const BAR_HEIGHT: f64 = 8.0;
+/// How bright the unfilled track is — dim, but present, like the system bar.
 const EMPTY_ALPHA: f64 = 0.30;
 
 /// The percentage, kept small and dim beneath the bar. The system OSD shows no
@@ -117,11 +112,8 @@ pub fn seconds_until_hide() -> Option<f64> {
 struct Hud {
     window: Retained<NSWindow>,
     percent: Retained<NSTextField>,
-    /// The sixteen bar cells, kept so their fill can be set on each show.
-    segments: Vec<Retained<CALayer>>,
-    /// The colour of a filled cell and of an unfilled one, made once.
-    filled: Retained<CGColor>,
-    empty: Retained<CGColor>,
+    /// The bright fill, whose width is set to the level on each show.
+    fill: Retained<CALayer>,
     /// When to hide, or [`None`] when already hidden.
     hide_at: Cell<Option<Instant>>,
 }
@@ -167,14 +159,11 @@ impl Hud {
             layer.setMasksToBounds(true);
         }
 
-        let filled = NSColor::whiteColor().CGColor();
-        let empty = NSColor::colorWithWhite_alpha(1.0, EMPTY_ALPHA).CGColor();
-
         if let Some(glyph) = Self::glyph(mtm) {
             effect.addSubview(&glyph);
         }
         let percent = Self::percent_label(mtm);
-        let (bar, segments) = Self::segment_bar(mtm, &empty);
+        let (bar, fill) = Self::level_bar(mtm);
         effect.addSubview(&percent);
         effect.addSubview(&bar);
         window.setContentView(Some(&effect));
@@ -182,9 +171,7 @@ impl Hud {
         Self {
             window,
             percent,
-            segments,
-            filled,
-            empty,
+            fill,
             hide_at: Cell::new(None),
         }
     }
@@ -226,16 +213,15 @@ impl Hud {
         label
     }
 
-    /// The segmented bar beneath it, sixteen cells, the way macOS draws it.
+    /// The continuous bar beneath the glyph, the way macOS draws it now.
     ///
-    /// A container view whose layer holds one sublayer per cell, so a change is
-    /// just recolouring sixteen layers rather than redrawing anything. Starts all
-    /// unfilled; the first show sets the fill.
-    fn segment_bar(
-        mtm: MainThreadMarker,
-        empty: &CGColor,
-    ) -> (Retained<NSView>, Vec<Retained<CALayer>>) {
+    /// A container view whose layer holds a dim full-width track and, above it, a
+    /// bright fill whose width is the level. Both fully rounded, so the fill ends
+    /// in the same pill shape the system bar has. Returns the fill for
+    /// [`Self::paint`] to resize.
+    fn level_bar(mtm: MainThreadMarker) -> (Retained<NSView>, Retained<CALayer>) {
         let bar_width = WIDTH - 2.0 * BAR_INSET_X;
+        let radius = BAR_HEIGHT / 2.0;
         let container = NSView::initWithFrame(
             NSView::alloc(mtm),
             NSRect::new(
@@ -245,24 +231,30 @@ impl Hud {
         );
         container.setWantsLayer(true);
 
-        // The cells share the width evenly, with a gap between each.
-        let seg_width = (bar_width - SEG_GAP * (SEGMENTS as f64 - 1.0)) / SEGMENTS as f64;
-        let mut segments = Vec::with_capacity(SEGMENTS);
-        for i in 0..SEGMENTS {
-            let cell = CALayer::layer();
-            cell.setFrame(NSRect::new(
-                NSPoint::new(i as f64 * (seg_width + SEG_GAP), 0.0),
-                NSSize::new(seg_width, BAR_HEIGHT),
-            ));
-            cell.setCornerRadius(SEG_CORNER);
-            cell.setBackgroundColor(Some(empty));
-            if let Some(layer) = container.layer() {
-                layer.addSublayer(&cell);
-            }
-            segments.push(cell);
+        let track = CALayer::layer();
+        track.setFrame(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(bar_width, BAR_HEIGHT),
+        ));
+        track.setCornerRadius(radius);
+        track.setBackgroundColor(Some(
+            &NSColor::colorWithWhite_alpha(1.0, EMPTY_ALPHA).CGColor(),
+        ));
+
+        let fill = CALayer::layer();
+        fill.setFrame(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(0.0, BAR_HEIGHT),
+        ));
+        fill.setCornerRadius(radius);
+        fill.setBackgroundColor(Some(&NSColor::whiteColor().CGColor()));
+
+        if let Some(layer) = container.layer() {
+            layer.addSublayer(&track);
+            layer.addSublayer(&fill);
         }
 
-        (container, segments)
+        (container, fill)
     }
 
     fn show(&self, level: u8, mtm: MainThreadMarker) {
@@ -274,14 +266,20 @@ impl Hud {
         self.hide_at.set(Some(Instant::now() + SHOW_FOR));
     }
 
-    /// Fills the cells up to the level, the rest dim, rounding to the nearest
-    /// cell so a whole-number step of a sixteenth lands on exactly one more.
+    /// Sets the fill to the level, without the slide animation a layer frame
+    /// change would otherwise play — a brightness step should land at once, not
+    /// glide, and a held key must not queue a backlog of glides.
     fn paint(&self, level: u8) {
-        let lit = (f64::from(level) / 100.0 * SEGMENTS as f64).round() as usize;
-        for (i, cell) in self.segments.iter().enumerate() {
-            let colour = if i < lit { &self.filled } else { &self.empty };
-            cell.setBackgroundColor(Some(colour));
-        }
+        let bar_width = WIDTH - 2.0 * BAR_INSET_X;
+        let width = bar_width * f64::from(level) / 100.0;
+
+        CATransaction::begin();
+        CATransaction::setDisableActions(true);
+        self.fill.setFrame(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(width, BAR_HEIGHT),
+        ));
+        CATransaction::commit();
     }
 
     /// Centres the overlay near the bottom of the main screen.

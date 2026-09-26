@@ -311,10 +311,12 @@ because the API has no modern replacement that avoids the permission.
 Built in `tray/src/hud.rs`, shaped to pass for the system OSD so it reads as
 inbuilt: a rounded *square* frosted `NSVisualEffectView` window, the system
 `sun.max.fill` SF Symbol filling the upper middle (the same glyph macOS uses),
-the sixteen-cell bar beneath it (filled cells white, the rest dim, one CALayer
-each), and the percentage small and dim below the bar — the OSD shows no number,
-so it is an unobtrusive addition rather than the centrepiece. Shown on a key or
-chord press and hidden a beat later. Rather than a timer
+a continuous bar beneath it — a dim full-width track with a bright white fill,
+both pill-rounded, the way the current OSD draws it (the segmented look was
+pre-2020) — and the percentage small and dim below the bar, since the OSD shows no
+number. The fill is resized inside a `CATransaction` with actions disabled, so a
+step lands at once rather than gliding. Shown on a key or chord press and hidden a
+beat later. Rather than a timer
 it hides cooperatively: a press books a deadline, the pump shortens its idle wait
 while the overlay is up and calls `hud::tick()` to take it down, so all the timing
 stays on the one thread the crate already runs on. `Driver::key_step` now returns
