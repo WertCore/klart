@@ -18,19 +18,32 @@ use std::time::{Duration, Instant};
 use objc2::MainThreadOnly;
 use objc2::rc::Retained;
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFont, NSLevelIndicator, NSLevelIndicatorStyle, NSScreen,
-    NSTextAlignment, NSTextField, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-    NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
-    NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSFont, NSScreen, NSTextAlignment, NSTextField, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
+use objc2_core_graphics::CGColor;
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
+use objc2_quartz_core::CALayer;
 
 /// The overlay's size, in points.
 const WIDTH: f64 = 200.0;
-const HEIGHT: f64 = 78.0;
+const HEIGHT: f64 = 82.0;
 
 /// How round the corners are, matching the system overlay closely enough.
 const CORNER: f64 = 18.0;
+
+/// The segmented bar, as macOS draws it: sixteen cells, filled from the left.
+const SEGMENTS: usize = 16;
+/// The bar's inset from the panel's sides, its baseline, and its thickness.
+const BAR_INSET_X: f64 = 20.0;
+const BAR_Y: f64 = 20.0;
+const BAR_HEIGHT: f64 = 12.0;
+/// The gap between cells and how round each cell is.
+const SEG_GAP: f64 = 3.0;
+const SEG_CORNER: f64 = 2.0;
+/// How bright an unfilled cell is — dim, but present, like the system bar.
+const EMPTY_ALPHA: f64 = 0.30;
 
 /// How long the overlay stays up after the last press.
 const SHOW_FOR: Duration = Duration::from_millis(1200);
@@ -85,11 +98,15 @@ pub fn seconds_until_hide() -> Option<f64> {
     HUD.with(|slot| slot.borrow().as_ref().and_then(Hud::remaining))
 }
 
-/// The overlay's window and the two things drawn in it.
+/// The overlay's window and the things drawn in it.
 struct Hud {
     window: Retained<NSWindow>,
     percent: Retained<NSTextField>,
-    bar: Retained<NSLevelIndicator>,
+    /// The sixteen bar cells, kept so their fill can be set on each show.
+    segments: Vec<Retained<CALayer>>,
+    /// The colour of a filled cell and of an unfilled one, made once.
+    filled: Retained<CGColor>,
+    empty: Retained<CGColor>,
     /// When to hide, or [`None`] when already hidden.
     hide_at: Cell<Option<Instant>>,
 }
@@ -135,8 +152,11 @@ impl Hud {
             layer.setMasksToBounds(true);
         }
 
+        let filled = NSColor::whiteColor().CGColor();
+        let empty = NSColor::colorWithWhite_alpha(1.0, EMPTY_ALPHA).CGColor();
+
         let percent = Self::percent_label(mtm);
-        let bar = Self::level_bar(mtm);
+        let (bar, segments) = Self::segment_bar(mtm, &empty);
         effect.addSubview(&percent);
         effect.addSubview(&bar);
         window.setContentView(Some(&effect));
@@ -144,7 +164,9 @@ impl Hud {
         Self {
             window,
             percent,
-            bar,
+            segments,
+            filled,
+            empty,
             hide_at: Cell::new(None),
         }
     }
@@ -162,26 +184,62 @@ impl Hud {
         label
     }
 
-    /// The bar beneath it, a continuous capacity gauge from 0 to 100.
-    fn level_bar(mtm: MainThreadMarker) -> Retained<NSLevelIndicator> {
-        let bar = NSLevelIndicator::initWithFrame(
-            NSLevelIndicator::alloc(mtm),
-            NSRect::new(NSPoint::new(24.0, 18.0), NSSize::new(WIDTH - 48.0, 14.0)),
+    /// The segmented bar beneath it, sixteen cells, the way macOS draws it.
+    ///
+    /// A container view whose layer holds one sublayer per cell, so a change is
+    /// just recolouring sixteen layers rather than redrawing anything. Starts all
+    /// unfilled; the first show sets the fill.
+    fn segment_bar(
+        mtm: MainThreadMarker,
+        empty: &CGColor,
+    ) -> (Retained<NSView>, Vec<Retained<CALayer>>) {
+        let bar_width = WIDTH - 2.0 * BAR_INSET_X;
+        let container = NSView::initWithFrame(
+            NSView::alloc(mtm),
+            NSRect::new(
+                NSPoint::new(BAR_INSET_X, BAR_Y),
+                NSSize::new(bar_width, BAR_HEIGHT),
+            ),
         );
-        bar.setLevelIndicatorStyle(NSLevelIndicatorStyle::ContinuousCapacity);
-        bar.setMinValue(0.0);
-        bar.setMaxValue(100.0);
-        bar.setDoubleValue(0.0);
-        bar
+        container.setWantsLayer(true);
+
+        // The cells share the width evenly, with a gap between each.
+        let seg_width = (bar_width - SEG_GAP * (SEGMENTS as f64 - 1.0)) / SEGMENTS as f64;
+        let mut segments = Vec::with_capacity(SEGMENTS);
+        for i in 0..SEGMENTS {
+            let cell = CALayer::layer();
+            cell.setFrame(NSRect::new(
+                NSPoint::new(i as f64 * (seg_width + SEG_GAP), 0.0),
+                NSSize::new(seg_width, BAR_HEIGHT),
+            ));
+            cell.setCornerRadius(SEG_CORNER);
+            cell.setBackgroundColor(Some(empty));
+            if let Some(layer) = container.layer() {
+                layer.addSublayer(&cell);
+            }
+            segments.push(cell);
+        }
+
+        (container, segments)
     }
 
     fn show(&self, level: u8, mtm: MainThreadMarker) {
         self.percent
             .setStringValue(&NSString::from_str(&format!("{level}%")));
-        self.bar.setDoubleValue(f64::from(level));
+        self.paint(level);
         self.reposition(mtm);
         self.window.orderFrontRegardless();
         self.hide_at.set(Some(Instant::now() + SHOW_FOR));
+    }
+
+    /// Fills the cells up to the level, the rest dim, rounding to the nearest
+    /// cell so a whole-number step of a sixteenth lands on exactly one more.
+    fn paint(&self, level: u8) {
+        let lit = (f64::from(level) / 100.0 * SEGMENTS as f64).round() as usize;
+        for (i, cell) in self.segments.iter().enumerate() {
+            let colour = if i < lit { &self.filled } else { &self.empty };
+            cell.setBackgroundColor(Some(colour));
+        }
     }
 
     /// Centres the overlay near the bottom of the main screen.

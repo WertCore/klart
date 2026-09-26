@@ -309,8 +309,10 @@ because the API has no modern replacement that avoids the permission.
       changing. Enough to be usable, thin for a control people expect a HUD from.
 
 Built in `tray/src/hud.rs`. A single borderless `NSVisualEffectView` window —
-frosted and rounded like the system overlay — with the percentage and a level
-bar, shown on a key or chord press and hidden a beat later. Rather than a timer
+frosted and rounded like the system overlay — with the percentage above a
+sixteen-cell bar drawn the way macOS draws its own (filled cells white, the rest
+dim, one CALayer each rather than a continuous gauge), shown on a key or chord
+press and hidden a beat later. Rather than a timer
 it hides cooperatively: a press books a deadline, the pump shortens its idle wait
 while the overlay is up and calls `hud::tick()` to take it down, so all the timing
 stays on the one thread the crate already runs on. `Driver::key_step` now returns
