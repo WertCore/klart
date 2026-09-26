@@ -238,7 +238,7 @@ unsafe extern "C-unwind" fn on_event(
 /// How far a brightness key asks the level to move, or [`None`] if the event is
 /// not a brightness key.
 ///
-/// [`Some(0.0)`] for the release: the caller swallows it without moving anything.
+/// `Some(0.0)` for the release: the caller swallows it without moving anything.
 fn brightness(event: NonNull<CGEvent>) -> Option<f32> {
     // The subtype and packed data of a system-defined event are read through the
     // NSEvent that wraps it; CGEvent has no accessor for them.
