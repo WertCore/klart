@@ -6,7 +6,7 @@ monitor dimmed, because a headless runner has no monitor.
 
 ## 1. Scaffold the workspace
 
-- [x] Cargo workspace, pinned toolchain, `rustfmt` settings, dual licence
+- [x] Cargo workspace, pinned toolchain, `rustfmt` settings, Apache-2.0 licence
 - [x] CI on macOS: format, clippy at `-D warnings`, tests, docs at `-D warnings`
 - [x] `Brightness`, the fraction every backend converts to and from
 
