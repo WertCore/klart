@@ -60,8 +60,9 @@ const NX_KEYTYPE_BRIGHTNESS_DOWN: isize = 3;
 ///
 /// A sixteenth of the range, which is the step macOS itself uses for the
 /// built-in panel — so a key does the same amount here as it does there, and the
-/// two do not feel like different controls.
-const STEP: f32 = 100.0 / 16.0;
+/// two do not feel like different controls. Shared with the chord fallback, so
+/// the two ways in move by the same amount.
+pub(crate) const STEP: f32 = 100.0 / 16.0;
 
 /// The installed tap, held for as long as the keys are wanted.
 ///

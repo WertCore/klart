@@ -291,8 +291,19 @@ machine.
 
 Still to do, each its own step rather than this one:
 
-- [ ] The `RegisterEventHotKey` chord fallback, for anyone who declines
+- [x] The `RegisterEventHotKey` chord fallback, for anyone who declines
       Accessibility — so the feature is reachable without the grant.
+
+Built in `tray/src/chord.rs`. `⌃⌥↑` / `⌃⌥↓` through Carbon's
+`RegisterEventHotKey`, which asks for no permission and works the moment it is
+installed — the price being that the chord is invented rather than the keys
+already on the keyboard. Registered whether or not the tap is (no harm in both,
+and a keyboard with no brightness keys has nothing else), acting on the display
+under the pointer through the same [`Driver`]. The menu shows the chord when the
+tap is not available, so it is offered exactly when it is the only way in; if
+another app already holds the chord, both keys fail to register and it stays
+quiet. Carbon is deprecated and this is the one corner of klart that uses it,
+because the API has no modern replacement that avoids the permission.
 - [ ] An on-screen level indicator. macOS shows its own HUD for the keys; klart
       swallows that with the key, so right now the only feedback is the screen
       changing. Enough to be usable, thin for a control people expect a HUD from.

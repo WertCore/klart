@@ -20,6 +20,7 @@ compile_error!(
      everywhere; a tray for this platform is a new crate, not a cfg"
 );
 
+mod chord;
 mod driver;
 mod keys;
 mod menu;
@@ -83,6 +84,10 @@ fn main() -> ExitCode {
     // drives, and dropping this would remove it. `None` when the permission is
     // not granted — the feature is then absent and the menu says why.
     let _keys = keys::install(&agent.driver);
+
+    // The no-permission fallback: a global hotkey that works whether or not the
+    // tap does. Nothing to hold — the registration lives with the process.
+    chord::install(&agent.driver);
 
     watch_for_display_changes();
 
