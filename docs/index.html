@@ -217,7 +217,7 @@ li { margin-bottom: 0.4rem; }
     <p class="tagline">Brightness for every display attached to the machine — the built-in panel and external monitors alike, from the menu bar or the command line.</p>
     <p class="lede">And when a monitor will not dim, it tells you why.</p>
     <div class="badges">
-      <a class="badge" href="https://github.com/WertCore/klart/releases/latest"><strong>v0.3.0</strong></a>
+      <a class="badge" href="https://github.com/WertCore/klart/releases/latest"><strong>v0.4.0</strong></a>
       <span class="badge">macOS · Linux · Windows</span>
       <span class="badge">MIT <strong>or</strong> Apache-2.0</span>
       <a class="badge" href="https://github.com/WertCore/klart">Source on <strong>GitHub</strong></a>
@@ -303,20 +303,20 @@ process. The difference is the link, not the interface.</code></pre>
 
 <section>
   <div class="wrap">
-    <h2>New in 0.3.0</h2>
-    <p class="sub">Driven by what people ask the other tools for, counted from their issue trackers.</p>
+    <h2>New in 0.4.0</h2>
+    <p class="sub">The brightness keys, made to work on every display.</p>
 
-    <h3>Levels go back after a sleep</h3>
-    <p>Brightness coming back wrong after a sleep is the single most-complained-about behaviour in this category. The reason it is hard is that a display does not answer the instant the machine wakes — the link returns before the panel behind it, and a write sent then is accepted and dropped <em>with no error</em>. So klart writes, reads back, and keeps trying until the display agrees.</p>
+    <h3>F1 and F2 control the monitor you&rsquo;re looking at</h3>
+    <p>macOS sends the brightness keys to the built-in panel and stops there — they do nothing to an external monitor. klart takes them over and points them at the display under the pointer, external monitors included, driving the real backlight over DDC/CI and falling through to a gamma ramp only where there is no other way. It shows the level as it goes, in an overlay shaped like the system&rsquo;s own.</p>
 
-    <h3>Scroll the menu bar icon</h3>
-    <p>A wheel or a trackpad over the icon, without opening anything. It moves every display by the same amount from wherever each one is, so two displays balanced against each other stay balanced.</p>
+    <h3>A shortcut that needs no permission</h3>
+    <p>The keys need Accessibility, which is yours to grant, not klart&rsquo;s to assume. If you would rather not, <code>⌃⌥↑</code> and <code>⌃⌥↓</code> do the same thing through a plain global hotkey that needs nothing — and it is there for keyboards with no brightness keys at all.</p>
 
-    <h3>Keep the displays&rsquo; relative brightness</h3>
-    <p>The all-displays slider is absolute by default: every display goes to the level shown. <code>:combined = relative</code> moves them all by the same amount instead, measured from where they were when the menu opened — so a display that pins at one end comes back to where it started rather than quietly losing the difference.</p>
+    <h3>A probe you can pipe</h3>
+    <p><code>klart probe --json</code> gives the whole diagnosis machine-readably — every attempt, every verdict, and the cross-display corroboration — which is the form to paste into an issue or feed to a script.</p>
 
-    <h3>The probe names HDR</h3>
-    <p>On Windows, HDR takes brightness control away without saying so. The probe now says so instead of reporting <code>Unclear</code>.</p>
+    <h3>Honest about autostart</h3>
+    <p>On Linux, where every mechanism sets brightness in hardware and it stays, there is no agent to keep running — so <code>klart autostart</code> now says so plainly rather than writing a login entry that starts and exits. On a Homebrew install the menu points at <code>brew services</code>, which is the thing that actually works there.</p>
   </div>
 </section>
 
@@ -348,7 +348,7 @@ process. The difference is the link, not the interface.</code></pre>
       <tr><td>Windows</td><td><span class="no">Command line, compiled and tested by CI, never run.</span></td></tr>
     </table>
 
-    <p>That table is about platforms. Individual features can be newer than the hardware they have been tried on — in 0.3.0, nobody has yet scrolled the menu bar icon, no HDR monitor has seen the HDR verdict, and the wake restore has not been checked across a real suspend. <a href="https://github.com/WertCore/klart/blob/main/PLAN.md">PLAN.md</a> records this per feature, one entry per change, with its own unticked boxes.</p>
+    <p>That table is about platforms. Individual features can be newer than the hardware they have been tried on — as of 0.4.0 no HDR monitor has seen the HDR verdict, and no DDC write has been confirmed against a monitor that answers on this developer&rsquo;s own machine. <a href="https://github.com/WertCore/klart/blob/main/PLAN.md">PLAN.md</a> records this per feature, one entry per change, with its own unticked boxes.</p>
   </div>
 </section>
 
