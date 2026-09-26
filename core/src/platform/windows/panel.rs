@@ -165,11 +165,17 @@ impl Backend for Wmi {
                 .SpawnInstance(0)
                 .map_err(|_| failed())?;
 
+            // The method's signature is `WmiSetBrightness(uint32 Timeout,
+            // uint8 Brightness)`. The variant types have to match the
+            // declaration: a `uint8` parameter given a `uint32` variant is
+            // rejected by `Put` with a type mismatch, which the failure does not
+            // spell out. So `Timeout` is a `u32` (VT_UI4) and `Brightness` a
+            // `u8` (VT_UI1).
             put(&parameters, "Timeout", VARIANT::from(TIMEOUT))?;
             put(
                 &parameters,
                 "Brightness",
-                VARIANT::from(u32::from(level.percent_rounded())),
+                VARIANT::from(level.percent_rounded()),
             )?;
 
             self.services
@@ -306,10 +312,13 @@ fn put(parameters: &IWbemClassObject, name: &str, value: VARIANT) -> Result<()> 
     unsafe {
         parameters
             .Put(&windows::core::HSTRING::from(name), 0, &value, 0)
-            .map_err(|_| Error::MechanismFailed {
+            .map_err(|error| Error::MechanismFailed {
                 mechanism: NAME,
                 call: "IWbemClassObject::Put",
-                code: -1,
+                // The real HRESULT rather than a sentinel: a type mismatch here
+                // reads as `0x80041005`, which is the difference between guessing
+                // and knowing what a parameter rejected.
+                code: error.code().0,
             })
     }
 }
