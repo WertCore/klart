@@ -22,6 +22,7 @@ compile_error!(
 
 mod chord;
 mod driver;
+mod hud;
 mod keys;
 mod menu;
 mod request;
@@ -104,6 +105,10 @@ fn main() -> ExitCode {
     loop {
         pump(&app, &agent, mtm);
 
+        // Take the on-screen level down once its moment has passed. Cheap when
+        // nothing is showing, which is almost always.
+        hud::tick();
+
         // Anything a drag could not land while the menu was open, and then the
         // levels it left behind.
         agent.driver.flush();
@@ -156,7 +161,10 @@ fn main() -> ExitCode {
 /// as well as acting on it would mean the icon both changed the brightness and
 /// flashed its highlight.
 fn pump(app: &NSApplication, agent: &Agent, mtm: MainThreadMarker) {
-    let deadline = NSDate::dateWithTimeIntervalSinceNow(IDLE_WAIT);
+    // While the level overlay is up, wait only until it is due to hide, so it
+    // comes down on time rather than at the next idle tick a second later.
+    let wait = hud::seconds_until_hide().map_or(IDLE_WAIT, |left| left.clamp(0.0, IDLE_WAIT));
+    let deadline = NSDate::dateWithTimeIntervalSinceNow(wait);
 
     // SAFETY: called on the main thread, which is where `NSApplication` requires
     // it, with a live deadline and the standard run loop mode.

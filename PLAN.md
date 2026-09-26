@@ -304,9 +304,21 @@ tap is not available, so it is offered exactly when it is the only way in; if
 another app already holds the chord, both keys fail to register and it stays
 quiet. Carbon is deprecated and this is the one corner of klart that uses it,
 because the API has no modern replacement that avoids the permission.
-- [ ] An on-screen level indicator. macOS shows its own HUD for the keys; klart
+- [x] An on-screen level indicator. macOS shows its own HUD for the keys; klart
       swallows that with the key, so right now the only feedback is the screen
       changing. Enough to be usable, thin for a control people expect a HUD from.
+
+Built in `tray/src/hud.rs`. A single borderless `NSVisualEffectView` window —
+frosted and rounded like the system overlay — with the percentage and a level
+bar, shown on a key or chord press and hidden a beat later. Rather than a timer
+it hides cooperatively: a press books a deadline, the pump shortens its idle wait
+while the overlay is up and calls `hud::tick()` to take it down, so all the timing
+stays on the one thread the crate already runs on. `Driver::key_step` now returns
+the level reached, which is what the overlay shows; a press dropped by the rate
+limit returns `None` and leaves whatever is up alone. Scroll-over-icon does not
+raise it — macOS never showed a HUD there and the menu-bar icon is already in
+view — so this is only where a system overlay was swallowed and there would
+otherwise be no feedback.
 - [ ] Modifier semantics — Lunar's Ctrl-for-external, or per-display targeting
       beyond "under the pointer". Wanted only once the plain case is proven good.
 

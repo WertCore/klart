@@ -222,7 +222,9 @@ unsafe extern "C-unwind" fn on_hotkey(
         if let Some(now) = CGEvent::new(None) {
             let at = CGEvent::location(Some(&now));
             let index = driver.display_at(at.x as i32, at.y as i32);
-            driver.key_step(index, delta);
+            if let Some(level) = driver.key_step(index, delta) {
+                crate::hud::show(level);
+            }
         }
     }
 
