@@ -37,9 +37,6 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSFont",
     # `NSBackingStoreType`, for the overlay window.
     "NSGraphics",
-    "NSLevelIndicator",
-    # `NSLevelIndicatorStyle` lives with the cell.
-    "NSLevelIndicatorCell",
     "NSMenu",
     "NSMenuItem",
     "NSImage",
@@ -81,12 +78,16 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     # The brightness-key takeover: an event tap and the events it carries.
     "CGEvent",
     "CGEventTypes",
+    # The overlay's segment colours, set on their layers.
+    "CGColor",
 ] }
 
-# The level indicator's rounded corners: a CALayer on its content view.
+# The overlay's rounded panel and its segmented bar: CALayers, coloured with
+# CoreGraphics colours.
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",
     "objc2-core-foundation",
+    "objc2-core-graphics",
     "CALayer",
 ] }
 
