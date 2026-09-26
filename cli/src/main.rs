@@ -330,16 +330,17 @@ fn candidates(found: &[Control]) -> Vec<Candidate> {
 }
 
 /// What to say about the login item.
-fn describe_autostart(state: LoginItem) -> &'static str {
+fn describe_autostart(state: LoginItem) -> String {
     match state {
-        LoginItem::Enabled => "on",
-        LoginItem::Disabled => "off",
+        LoginItem::Enabled => "on".to_owned(),
+        LoginItem::Disabled => "off".to_owned(),
         LoginItem::AwaitingApproval => {
             "registered, waiting to be allowed in System Settings under General, Login Items"
+                .to_owned()
         }
-        LoginItem::Unavailable => {
-            "unavailable — this is not running from the app bundle. Build it with \
-             `scripts/bundle.sh` and run `Klart.app/Contents/MacOS/klart` instead."
-        }
+        // The reason is carried by the state, because it differs by platform —
+        // no bundle on macOS, not applicable on Linux, a registry failure on
+        // Windows — and one message here was wrong for two of them.
+        LoginItem::Unavailable(reason) => format!("unavailable — {reason}"),
     }
 }
