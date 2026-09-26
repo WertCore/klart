@@ -123,14 +123,26 @@ impl Backend for Wmi {
 
     fn set(&self, level: Brightness) -> Result<()> {
         let path = format!(
-            "WmiMonitorBrightnessMethods.InstanceName='{}'",
-            escape(&self.instance)
+            "WmiMonitorBrightnessMethods.InstanceName=\"{}\"",
+            escape_path(&self.instance)
         );
 
-        let failed = || Error::MechanismFailed {
+        let failed = |call: &'static str| {
+            move |error: windows::core::Error| Error::MechanismFailed {
+                mechanism: NAME,
+                call,
+                // The real HRESULT rather than a sentinel. `ExecMethod` answers
+                // `0x80041002` when the path names no instance and `0x80041008`
+                // when it is not a path at all, and those are two different
+                // faults to fix.
+                code: error.code().0,
+            }
+        };
+
+        let missing = || Error::NoReply {
             mechanism: NAME,
-            call: "WmiSetBrightness",
-            code: -1,
+            display: self.display.clone(),
+            attempts: 1,
         };
 
         // SAFETY: every argument below is live for the call, and each COM
@@ -147,31 +159,34 @@ impl Backend for Wmi {
                     Some(std::ptr::addr_of_mut!(class)),
                     None,
                 )
-                .map_err(|_| failed())?;
+                .map_err(failed("GetObject"))?;
 
             let mut signature: Option<IWbemClassObject> = None;
             class
-                .ok_or_else(failed)?
+                .ok_or_else(missing)?
                 .GetMethod(
                     &windows::core::HSTRING::from("WmiSetBrightness"),
                     0,
                     &mut signature,
                     std::ptr::null_mut(),
                 )
-                .map_err(|_| failed())?;
+                .map_err(failed("GetMethod"))?;
 
             let parameters = signature
-                .ok_or_else(failed)?
+                .ok_or_else(missing)?
                 .SpawnInstance(0)
-                .map_err(|_| failed())?;
+                .map_err(failed("SpawnInstance"))?;
 
             // The method's signature is `WmiSetBrightness(uint32 Timeout,
-            // uint8 Brightness)`. The variant types have to match the
-            // declaration: a `uint8` parameter given a `uint32` variant is
-            // rejected by `Put` with a type mismatch, which the failure does not
-            // spell out. So `Timeout` is a `u32` (VT_UI4) and `Brightness` a
-            // `u8` (VT_UI1).
-            put(&parameters, "Timeout", VARIANT::from(TIMEOUT))?;
+            // uint8 Brightness)`, and the variant given to each parameter has to
+            // be the one WMI uses to *represent* that CIM type — which is not
+            // the one its name suggests. WMI has no unsigned 32-bit variant:
+            // `CIM_UINT32` travels as `VT_I4`, a signed `i32`, so a `u32`
+            // (`VT_UI4`) is refused by `Put` with `WBEM_E_TYPE_MISMATCH`
+            // (`0x80041005`) and nothing names the parameter that did it.
+            // `CIM_UINT8` keeps its own `VT_UI1`, the width where the signed
+            // variant would lose the top half of the range.
+            put(&parameters, "Timeout", VARIANT::from(TIMEOUT as i32))?;
             put(
                 &parameters,
                 "Brightness",
@@ -188,7 +203,7 @@ impl Backend for Wmi {
                     None,
                     None,
                 )
-                .map_err(|_| failed())?;
+                .map_err(failed("WmiSetBrightness"))?;
         }
 
         Ok(())
@@ -390,6 +405,19 @@ fn escape(instance: &str) -> String {
     instance.replace('\\', r"\\").replace('\'', r"\'")
 }
 
+/// Makes a string safe to embed in the quoted key of an object path.
+///
+/// An object path is a different grammar from WQL, and the difference is not a
+/// compile error but a HRESULT nobody can read: single quotes, which WQL wants,
+/// answer `WBEM_E_NOT_FOUND` (`0x80041002`), and a raw name answers
+/// `WBEM_E_INVALID_CLASS` (`0x80041008`) because the path parser reads its lone
+/// backslashes as escapes. Keys take double quotes, and a literal backslash
+/// inside one is written `\\` — which is exactly how
+/// `IWbemClassObject::GetObjectText` renders the same instance back out.
+fn escape_path(instance: &str) -> String {
+    instance.replace('\\', r"\\").replace('"', r#"\""#)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +436,23 @@ mod tests {
     #[test]
     fn a_quote_cannot_close_the_literal_early() {
         assert_eq!(escape("it's"), r"it\'s");
+    }
+
+    #[test]
+    fn an_object_path_doubles_backslashes_and_takes_double_quotes() {
+        // The shape `ExecMethod` accepts, verified against a live panel: the
+        // single quotes WQL wants make this path name no instance at all.
+        assert_eq!(
+            format!(
+                "WmiMonitorBrightnessMethods.InstanceName=\"{}\"",
+                escape_path(r"DISPLAY\SAM71E3\5&1a2b3c4d&0&UID256_0")
+            ),
+            r#"WmiMonitorBrightnessMethods.InstanceName="DISPLAY\\SAM71E3\\5&1a2b3c4d&0&UID256_0""#
+        );
+    }
+
+    #[test]
+    fn a_double_quote_cannot_close_an_object_path_key_early() {
+        assert_eq!(escape_path("a\"b"), r#"a\"b"#);
     }
 }

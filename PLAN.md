@@ -522,9 +522,13 @@ than a `cfg`.
 - [x] Autostart under the `Run` key
 - [x] CI that builds and tests it
 - [x] The laptop panel, through WMI
-- [ ] Run it on a Windows machine
+- [x] Run it on a Windows machine
 
-**Written, compiled and tested by CI. Never run.**
+**Written and compiled by CI, then run on real hardware.** Two things only a live
+panel told: `CIM_UINT32` is passed to `WmiSetBrightness` as a `VT_I4`, not the
+`VT_UI4` its name suggests — `Put` refuses the latter with
+`WBEM_E_TYPE_MISMATCH` and never says which parameter — and an object path takes
+double quotes with doubled backslashes, not the single-quoted form WQL wants.
 
 The pleasant surprise is that this is the easiest of the three. Every mechanism
 is documented, supported public API: `GetMonitorBrightness` and
