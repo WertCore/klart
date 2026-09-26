@@ -275,6 +275,15 @@ pub fn build(mtm: MainThreadMarker, driver: &Rc<Driver>) -> Built {
         menu.addItem(&keep_offsets_item(mtm, &controller, driver.combined()));
     }
     menu.addItem(&login_item(mtm, &controller));
+    // Only when the brightness keys cannot be taken over, so the feature is
+    // discoverable by its absence rather than silent. When it is working there is
+    // nothing to say — the keys just work.
+    if !crate::keys::trusted() {
+        menu.addItem(&label(
+            mtm,
+            "Brightness keys: grant Accessibility, then relaunch klart",
+        ));
+    }
     menu.addItem(&command(
         mtm,
         &controller,

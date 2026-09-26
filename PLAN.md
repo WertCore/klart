@@ -258,28 +258,46 @@ Input Monitoring) because a tap can *swallow* the event — return null and macO
 does not also dim the built-in panel — which passive HID observation cannot. That
 choice rests on one machine-dependent unknown, which is what the spike is for.
 
-### Spike: `tray/examples/keys.rs`
+### Spike, then the feature: `tray/src/keys.rs`
 
 - [x] Confirm a session `CGEventTap` is refused without Accessibility
+- [x] Confirm a *granted* tap receives the brightness keys, and as what
+- [x] Take over the keys: drive the display under the pointer, and swallow
 
-Run and observed 2026-09-26: with the permission ungranted, `tap_create` returns
-`None`. That is the hard gate proven rather than assumed — no grant, no tap, so
-the chord fallback is not optional. The example says so and exits cleanly rather
-than panicking.
+The spike (an example, since removed once it had served) proved both unknowns on
+2026-09-26. Ungranted, `tap_create` returns `None` — the hard gate, so the chord
+fallback below is not optional. Granted, the keys arrive as *system-defined* aux
+events (subtype 8, `NX_KEYTYPE_BRIGHTNESS_UP`/`DOWN`), each a press then a
+release, which is the media-key case — "Use F1/F2 as standard function keys" off,
+its default. So the `CGEventTap`/Accessibility route holds on this hardware and
+the HID fallback is not needed; swallowing comes with visibility.
 
-- [ ] Confirm a *granted* tap actually receives the brightness keys on this
-      machine, and as what — a key-down (plain F-keys) or a system-defined aux
-      event (media keys). This is the MonitorControl-vs-Lunar question and it is
-      machine-dependent: MonitorControl reaches for HID precisely because a tap
-      does not always see these keys. Interactive — needs Accessibility granted
-      to the terminal and the keys pressed by hand, so it is the user's to run:
-      `cargo run --example keys -p klart-tray`, grant when asked, press F1/F2.
+The feature is now `tray/src/keys.rs`. On a press it moves the display under the
+pointer — [`Driver::display_at`] resolves it from `CGEventGetLocation` against the
+displays' bounds, both in the same global top-left coordinates — through the
+existing [`Driver`], so a key gets DDC-then-gamma and the sub-floor range for
+free. The release is swallowed too, so the system never sees half a key. It steps
+a sixteenth of the range, matching what macOS does to the built-in panel, and caps
+the rate at one step per `WRITE_GAP` because holding auto-repeats faster than
+DDC/CI answers. A tap the system switches off is turned back on.
 
-If the tap sees them, swallowing is settled with it: a non-`ListenOnly` tap drops
-an event by returning null, and the example is one line from proving it (left
-undone so it does not make the keys briefly dead under someone's fingers). If the
-tap does *not* see them, the decision above flips to the HID route and Input
-Monitoring, and this entry is why.
+Without Accessibility it installs nothing and the menu says so; the first launch
+asks for the grant, which takes effect on the next, as it does for every app that
+needs it. `display_at`'s geometry is unit-tested (shared edges, negative
+coordinates for a display left of main, zero-sized bounds → main-display default).
+The tap firing and the swallow are not — they need a granted process and real key
+presses, so, like the scroll handling, they are for a person to confirm on the
+machine.
+
+Still to do, each its own step rather than this one:
+
+- [ ] The `RegisterEventHotKey` chord fallback, for anyone who declines
+      Accessibility — so the feature is reachable without the grant.
+- [ ] An on-screen level indicator. macOS shows its own HUD for the keys; klart
+      swallows that with the key, so right now the only feedback is the screen
+      changing. Enough to be usable, thin for a control people expect a HUD from.
+- [ ] Modifier semantics — Lunar's Ctrl-for-external, or per-display targeting
+      beyond "under the pointer". Wanted only once the plain case is proven good.
 
 ## 11. Ship it
 

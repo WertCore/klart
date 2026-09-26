@@ -21,6 +21,7 @@ compile_error!(
 );
 
 mod driver;
+mod keys;
 mod menu;
 mod request;
 mod scroll;
@@ -76,6 +77,12 @@ fn main() -> ExitCode {
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
     let mut agent = Agent::start(mtm);
+
+    // Take over the brightness keys, if Accessibility allows it. Held for the
+    // agent's life: the tap lives on the main run loop, which the pump below
+    // drives, and dropping this would remove it. `None` when the permission is
+    // not granted — the feature is then absent and the menu says why.
+    let _keys = keys::install(&agent.driver);
 
     watch_for_display_changes();
 

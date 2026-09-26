@@ -23,6 +23,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     # `statusItemWithLength` takes a `CGFloat` and `NSRect` comes from the same
     # place, so the geometry types have to come with it.
     "objc2-core-foundation",
+    # `NSEvent::eventWithCGEvent`, the bridge used to decode a media key, is
+    # gated on the core-graphics link.
+    "objc2-core-graphics",
     "NSApplication",
     "NSButton",
     "NSCell",
@@ -61,26 +64,19 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "CGDirectDisplay",
     "CGDisplayConfiguration",
     "CGError",
-] }
-
-# Only the `keys` example (a spike for PLAN entry 10) needs an event tap and a
-# run loop to drive it. Kept out of the binary's own dependencies until the
-# feature it is exploring is committed to.
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-objc2-core-graphics = { version = "0.3", default-features = false, features = [
-    "std",
+    # The brightness-key takeover: an event tap and the events it carries.
     "CGEvent",
     "CGEventTypes",
 ] }
+
+# The event tap needs a run loop to drive it and a mach port to feed it; the
+# Accessibility prompt needs a small options dictionary. See `keys.rs`.
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "CFRunLoop",
     "CFMachPort",
-] }
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSEvent",
-    # `NSEvent::eventWithCGEvent` — the bridge used to decode a media key — is
-    # gated on the core-graphics link.
-    "objc2-core-graphics",
+    "CFString",
+    "CFDictionary",
+    # `CFBoolean` and `kCFBooleanTrue` live with the number types.
+    "CFNumber",
 ] }

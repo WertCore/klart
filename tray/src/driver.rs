@@ -10,7 +10,7 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::{Duration, Instant};
 
-use klart_core::{Brightness, Combined, Control, Remembered};
+use klart_core::{Bounds, Brightness, Combined, Control, Remembered};
 
 /// The shortest gap between two writes to one display.
 ///
@@ -108,6 +108,23 @@ fn close_enough(reached: Brightness, wanted: Brightness) -> bool {
     reached.percent_rounded().abs_diff(wanted.percent_rounded()) <= TOLERANCE
 }
 
+/// Whether a point falls within a display's bounds.
+///
+/// Half-open on the far edges — a point on the right or bottom edge belongs to
+/// the next display, not this one — so two displays sharing an edge do not both
+/// claim it. Zero-sized bounds hold nothing, which is how a platform that does
+/// not report geometry (Linux) falls through to the main-display default.
+fn bounds_hold(bounds: Bounds, x: i32, y: i32) -> bool {
+    let right = bounds.x.saturating_add_unsigned(bounds.width);
+    let bottom = bounds.y.saturating_add_unsigned(bounds.height);
+    bounds.width > 0
+        && bounds.height > 0
+        && x >= bounds.x
+        && x < right
+        && y >= bounds.y
+        && y < bottom
+}
+
 /// The displays, and what has recently been asked of them.
 pub struct Driver {
     controls: RefCell<Vec<Control>>,
@@ -143,6 +160,13 @@ pub struct Driver {
     /// individually would let some take a step the others missed and pull them
     /// apart.
     scrolled_at: Cell<Instant>,
+    /// When the last brightness-key step went out.
+    ///
+    /// Separate from the scroll clock so a key press and a scroll do not gate
+    /// each other, and shared across displays because holding the key
+    /// auto-repeats faster than a DDC/CI bus drains: this caps the rate at one
+    /// step per [`WRITE_GAP`], which the bus can take.
+    keyed_at: Cell<Instant>,
 }
 
 impl Driver {
@@ -158,6 +182,7 @@ impl Driver {
             baseline: RefCell::new(None),
             scroll_owed: Cell::new(0.0),
             scrolled_at: Cell::new(far_enough_back()),
+            keyed_at: Cell::new(far_enough_back()),
         }
     }
 
@@ -335,6 +360,49 @@ impl Driver {
         for display in 0..count {
             self.nudge(display, whole);
         }
+    }
+
+    /// Steps one display from a brightness key.
+    ///
+    /// One display rather than all, because a brightness key acts on the display
+    /// the person is looking at — resolved by the caller from the pointer — the
+    /// way the same key acts on the built-in panel alone by default. Rate limited
+    /// as a group by its own clock: holding the key auto-repeats faster than a
+    /// DDC/CI link can answer, so the extra events are dropped rather than
+    /// queued, which would leave the monitor trailing the key by seconds.
+    pub fn key_step(&self, display: usize, percent: f32) {
+        if !percent.is_finite() {
+            return;
+        }
+        if self.keyed_at.get().elapsed() < WRITE_GAP {
+            return;
+        }
+        self.keyed_at.set(Instant::now());
+        self.nudge(display, percent);
+    }
+
+    /// Which display holds the point, in the global top-left coordinates that
+    /// both [`CGEventGetLocation`] and [`crate::driver`]'s bounds are given in.
+    ///
+    /// Falls back to the main display, then to the first, so a key always lands
+    /// somewhere even when the pointer is over a display klart cannot see or the
+    /// bounds are unknown (as on a platform that does not report them).
+    ///
+    /// [`CGEventGetLocation`]: objc2_core_graphics::CGEvent::location
+    pub fn display_at(&self, x: i32, y: i32) -> usize {
+        let controls = self.controls.borrow();
+
+        let holds = controls
+            .iter()
+            .position(|control| bounds_hold(control.display().bounds(), x, y));
+
+        holds
+            .or_else(|| {
+                controls
+                    .iter()
+                    .position(|control| control.display().is_main())
+            })
+            .unwrap_or(0)
     }
 
     /// Moves one display from wherever it is.
@@ -585,6 +653,52 @@ fn far_enough_back() -> Instant {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bounds(x: i32, y: i32, width: u32, height: u32) -> Bounds {
+        Bounds {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn a_point_inside_the_bounds_is_held() {
+        assert!(bounds_hold(bounds(0, 0, 1000, 500), 500, 250));
+        // The near edges are inclusive.
+        assert!(bounds_hold(bounds(0, 0, 1000, 500), 0, 0));
+    }
+
+    #[test]
+    fn the_far_edges_belong_to_the_next_display() {
+        // A display at x=0 width 1000 ends before x=1000, which is the left edge
+        // of whatever is placed to its right. Both claiming 1000 would make the
+        // target depend on iteration order.
+        let b = bounds(0, 0, 1000, 500);
+        assert!(!bounds_hold(b, 1000, 250));
+        assert!(!bounds_hold(b, 500, 500));
+        assert!(bounds_hold(b, 999, 499));
+    }
+
+    #[test]
+    fn a_second_display_to_the_left_has_negative_coordinates() {
+        // Bounds are relative to the main display's top-left, so a display to the
+        // left of it has a negative x — the point resolution must handle that.
+        let left = bounds(-1000, 0, 1000, 500);
+        assert!(bounds_hold(left, -500, 250));
+        assert!(
+            !bounds_hold(left, 0, 250),
+            "x=0 is the main display, not this"
+        );
+    }
+
+    #[test]
+    fn zero_sized_bounds_hold_nothing() {
+        // Linux reports no geometry, so every point must miss and fall through to
+        // the main-display default rather than landing on a phantom.
+        assert!(!bounds_hold(bounds(0, 0, 0, 0), 0, 0));
+    }
 
     /// A restore that nothing answers must stop of its own accord.
     ///
