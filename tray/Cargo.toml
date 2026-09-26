@@ -26,22 +26,36 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     # `NSEvent::eventWithCGEvent`, the bridge used to decode a media key, is
     # gated on the core-graphics link.
     "objc2-core-graphics",
+    # The on-screen level indicator rounds its panel with a CALayer.
+    "objc2-quartz-core",
     "NSApplication",
     "NSButton",
     "NSCell",
+    "NSColor",
     "NSControl",
     "NSEvent",
+    "NSFont",
+    # `NSBackingStoreType`, for the overlay window.
+    "NSGraphics",
+    "NSLevelIndicator",
+    # `NSLevelIndicatorStyle` lives with the cell.
+    "NSLevelIndicatorCell",
     "NSMenu",
     "NSMenuItem",
     "NSImage",
     "NSResponder",
     # `NSApplicationActivationPolicy` lives with the running-application types.
     "NSRunningApplication",
+    # The level indicator's window: where it sits and which screen it sits on.
+    "NSScreen",
     "NSSlider",
     "NSStatusBar",
     "NSStatusBarButton",
     "NSStatusItem",
+    "NSText",
+    "NSTextField",
     "NSView",
+    "NSVisualEffectView",
     # A status item's button has a window of its own, and its number is how a
     # scroll event is recognised as being over the icon.
     "NSWindow",
@@ -67,6 +81,13 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = [
     # The brightness-key takeover: an event tap and the events it carries.
     "CGEvent",
     "CGEventTypes",
+] }
+
+# The level indicator's rounded corners: a CALayer on its content view.
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "CALayer",
 ] }
 
 # The event tap needs a run loop to drive it and a mach port to feed it; the

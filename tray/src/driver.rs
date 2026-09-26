@@ -370,15 +370,19 @@ impl Driver {
     /// as a group by its own clock: holding the key auto-repeats faster than a
     /// DDC/CI link can answer, so the extra events are dropped rather than
     /// queued, which would leave the monitor trailing the key by seconds.
-    pub fn key_step(&self, display: usize, percent: f32) {
+    ///
+    /// Returns the level reached, for the on-screen indicator, or [`None`] when
+    /// the press was dropped by the rate limit or the display would not answer —
+    /// when there is nothing new to show.
+    pub fn key_step(&self, display: usize, percent: f32) -> Option<u8> {
         if !percent.is_finite() {
-            return;
+            return None;
         }
         if self.keyed_at.get().elapsed() < WRITE_GAP {
-            return;
+            return None;
         }
         self.keyed_at.set(Instant::now());
-        self.nudge(display, percent);
+        self.nudge(display, percent)
     }
 
     /// Which display holds the point, in the global top-left coordinates that
@@ -405,31 +409,32 @@ impl Driver {
             .unwrap_or(0)
     }
 
-    /// Moves one display from wherever it is.
+    /// Moves one display from wherever it is, returning the level it reached.
     ///
     /// Reads before writing, so that a change made anywhere else — the monitor's
-    /// own buttons, another program — is what this steps from.
-    fn nudge(&self, display: usize, percent: f32) {
+    /// own buttons, another program — is what this steps from. [`None`] when the
+    /// display cannot be read or written, which is also what tells a caller there
+    /// is no level to show for it.
+    fn nudge(&self, display: usize, percent: f32) -> Option<u8> {
         let controls = self.controls.borrow();
-        let Some(control) = controls.get(display) else {
-            return;
-        };
+        let control = controls.get(display)?;
         let Ok(current) = control.get() else {
             // Nothing to step from. Silent: a display that cannot be read is
             // already reported wherever it was opened, and a scroll is not the
             // place to say it again once per event.
-            return;
+            return None;
         };
 
         let moved = current.stepped(percent / 100.0);
         if let Err(problem) = control.set(moved) {
             eprintln!("klart-tray: {}: {problem}", control.name());
-            return;
+            return None;
         }
 
         self.remembered
             .borrow_mut()
             .remember(control.display().key(), moved);
+        Some(moved.percent_rounded())
     }
 
     /// How a combined control moves the displays.
