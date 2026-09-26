@@ -318,7 +318,14 @@ fn command(
 /// back at full brightness after every restart.
 fn login_item(mtm: MainThreadMarker, controller: &Controller) -> Retained<NSMenuItem> {
     match klart_core::login_item() {
-        LoginItem::Unavailable => label(mtm, "Start at login — needs the app bundle"),
+        // A running tray with no bundle is almost always a Homebrew install —
+        // `brew install` lifts the binaries out of the bundle, so `SMAppService`
+        // has nothing to register. The old label ("needs the app bundle") left
+        // that person stuck; `brew services` is their actual answer, and it is
+        // what keeps the agent across logins in the first place. The reason the
+        // state carries is fuller but too long for a menu row, so this says the
+        // useful half.
+        LoginItem::Unavailable(_) => label(mtm, "Start at login — run: brew services start klart"),
 
         LoginItem::AwaitingApproval => {
             // Registered, and macOS is waiting for the person to allow it in

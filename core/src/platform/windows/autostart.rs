@@ -24,7 +24,9 @@ const VALUE: &str = "klart";
 /// Whether the agent will start with the session.
 pub fn status() -> LoginItem {
     let Some(key) = open(KEY_READ) else {
-        return LoginItem::Unavailable;
+        return LoginItem::Unavailable(
+            "could not open the Run key under HKEY_CURRENT_USER to read it",
+        );
     };
 
     let name = to_wide(VALUE);

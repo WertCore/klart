@@ -825,14 +825,30 @@ that quietly drops the caveats the rest of the project states is a landing page
 that lies.
 
 One thing the page deliberately does not say: `klart autostart on` is offered
-only under macOS. On Linux the entry it writes has `Exec` pointing at the command
-line rather than an agent, because there is no agent there — so it starts a
-process that prints its help and exits. That is a real defect in the Linux
-autostart, found while writing this and not fixed here; it has its own box below.
+only under macOS. On Linux the entry it wrote had `Exec` pointing at the command
+line rather than an agent, because there is no agent there — so it started a
+process that printed its help and exited. That was a real defect in the Linux
+autostart, found while writing this; it has its own box below, now fixed.
 
-- [ ] Linux `autostart` writes a `.desktop` that runs the command line, which
+- [x] Linux `autostart` writes a `.desktop` that runs the command line, which
       exits immediately. It should refuse on a platform with no agent, or say
       what it is for.
+
+Fixed 2026-09-26. Linux `autostart` now refuses: `status` is always
+`Unavailable`, `set(true)` returns an error, and the reason is not that the agent
+is missing but that there is no work for one — both Linux mechanisms set
+brightness in hardware, which keeps it, so nothing has to be held the way a macOS
+gamma ramp does. `set(false)` is still honoured, so anyone upgrading from the
+version that wrote a `.desktop` can clear the dead one with `klart autostart off`.
+
+This turned into a small change with reach, because the reason had to travel.
+`LoginItem::Unavailable` now carries a `&'static str`: the message is right for
+macOS (no bundle), Linux (not applicable) and Windows (registry) separately,
+where before a single macOS-shaped sentence was baked into the caller and wrong
+for the other two. That also fixed the tray, whose "Start at login — needs the
+app bundle" row misdirected Homebrew users; it now points them at
+`brew services start klart`, and the macOS error for `klart autostart on` from a
+non-bundle build says the same rather than only naming `scripts/bundle.sh`.
 
 ## 28. Tell Homebrew users the command that works
 

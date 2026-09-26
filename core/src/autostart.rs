@@ -23,9 +23,13 @@ pub enum LoginItem {
     /// will honour it. Until they say yes in System Settings, this is where it
     /// stays — which is why it is worth showing rather than reporting as enabled.
     AwaitingApproval,
-    /// This build cannot ask the question.
+    /// The question does not apply to this build, with the reason why.
     ///
-    /// Either it is not running from an application bundle, so there is nothing
-    /// for the system to launch, or the system is older than `SMAppService`.
-    Unavailable,
+    /// The reason differs by platform and is carried rather than assumed: on
+    /// macOS the agent is not running from an application bundle (or the system
+    /// predates `SMAppService`); on Linux there is no agent to keep running at
+    /// all, because every mechanism there changes brightness in hardware and it
+    /// persists on its own; on Windows the registry could not be opened. A single
+    /// message baked into the caller was wrong for two of the three.
+    Unavailable(&'static str),
 }

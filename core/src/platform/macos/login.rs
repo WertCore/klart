@@ -20,10 +20,19 @@ use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use crate::autostart::LoginItem;
 
+/// Why the login item is unavailable, and what to do instead.
+///
+/// The two ways to have no bundle are a build run out of `target/` and a
+/// Homebrew install, which lifts the binaries out of the bundle. `brew services`
+/// covers the second — it is the Homebrew user's answer, and pointing only at
+/// `scripts/bundle.sh` (as this once did) left them nowhere useful to go.
+const NO_BUNDLE: &str = "not running from an app bundle; run it from Klart.app, or start the agent with \
+     `brew services start klart`";
+
 /// Whether the agent will start with the session.
 pub fn status() -> LoginItem {
     let Some(service) = service() else {
-        return LoginItem::Unavailable;
+        return LoginItem::Unavailable(NO_BUNDLE);
     };
 
     // SAFETY: the class exists and this takes no arguments.
@@ -42,12 +51,9 @@ pub fn status() -> LoginItem {
 /// "no such bundle" and is not worth paraphrasing.
 pub fn set(enabled: bool) -> Result<LoginItem, String> {
     let Some(service) = service() else {
-        return Err(
-            "this build cannot register a login item: it is not running from an application \
-             bundle, or this macOS predates SMAppService. Build the bundle with \
-             `scripts/bundle.sh` and run it from there."
-                .to_owned(),
-        );
+        return Err(format!(
+            "this build cannot register a login item: {NO_BUNDLE}."
+        ));
     };
 
     // SAFETY: the class exists and neither takes arguments.
