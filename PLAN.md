@@ -1063,9 +1063,53 @@ had the better part of a year of fixes in them. `klart-tray-common` now holds
 `driver` and `request`; the macOS menu and the Windows panel each keep only what
 the other platform has no equivalent for.
 
-What is unticked is what needs a machine with a monitor and a person in front of
-it: none of the drawing, placement or drag handling has been watched. The agent
-starts and stays running here, and the unit tests cover the geometry, the
-colour packing, the icon rasteriser and the shared driver's rules — but a test
-suite has no taskbar. The macOS half of the extraction is likewise the CI's to
-prove: it cannot be compiled on Windows.
+What was unticked was what needed a machine with a monitor and a person in front
+of it: the drawing, placement and drag handling. The agent started and stayed
+running, and the unit tests covered the geometry, the colour packing, the icon
+rasteriser and the shared driver's rules — but a test suite has no taskbar. The
+first person to open it found the icon in the overflow and the drag too slow;
+entry 32 is what that changed. The macOS half of the extraction was the CI's to
+prove, since it cannot be compiled on Windows, and CI has since compiled it.
+
+## 32. Beside the clock, and a drag that keeps up
+
+- [x] Promote the icon out of the overflow on Windows 11, once, and never
+      override an icon the person has hidden
+- [x] Brightness writes on a thread of their own, coalesced to the newest value
+      per display
+- [x] Repaint the row before the write is handed over
+- [x] A synthetic drag of 241 moves: every message returned in under 4 ms, and
+      the display reached the position asked for
+- [ ] The icon sits beside the sound icon on an ordinary login
+- [ ] A hand-driven drag feels as immediate as the measurement says
+- [ ] Opening the panel while a write is in flight does not read a busy link
+
+Windows puts every new notification icon in the overflow area, and its
+documentation says only the person may promote one. Windows 11 changed the
+storage rather than the rule: `HKCU\Control Panel\NotifyIconSettings` has a
+subkey per icon with an `IsPromoted` DWORD, and Explorer reacts to it at once.
+Writing 1 when the value is absent is therefore the first-run default; writing it
+over a 0 would be overruling someone who used Settings to hide klart, so a 0 is
+left alone. The key does not exist on Windows 10, where the per-icon choice lives
+in a binary stream; there the icon stays in the overflow until it is dragged out,
+because rewriting Explorer's stream is not a tray's business. `Shell_NotifyIcon`
+has no flag for any of this, and the registry route is undocumented — every
+failure in it is silent, since not being promoted is what the shell would have
+chosen anyway.
+
+The first report from a real panel was that the slider was very laggy. It was:
+`SetMonitorBrightness` took about two hundred milliseconds here, and the write
+was made inside `WM_MOUSEMOVE`, before the repaint. Every step of a drag stopped
+the message loop for a fifth of a second, so the knob moved at the monitor's rate
+and the pointer had no say. The writes now go to a worker thread that owns its
+own controls — a backend is deliberately not `Send`, so it enumerates them on the
+thread that will use them — and the panel paints with `UpdateWindow` before
+handing the value over. The worker drains its queue after each write and keeps
+only the newest value per display; the intermediate positions describe a pointer
+that has already moved on.
+
+Measured with 241 synthetic moves across a bar, one every 8 ms: the slowest
+message took 3.2 ms, the median 0.6 ms, and the display finished at 95%, which is
+where the pointer left it. What is still unticked is what a person sees: that the
+promoted icon is in the row beside the sound icon, and that a hand-driven drag
+feels like the numbers.

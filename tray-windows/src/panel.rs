@@ -21,14 +21,15 @@ use windows_sys::Win32::Foundation::{
     COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Dwm::{
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreateSolidBrush, DC_BRUSH, DC_PEN, DRAW_TEXT_FORMAT, DT_END_ELLIPSIS, DT_LEFT,
     DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect,
     GetMonitorInfoW, GetStockObject, HDC, HFONT, InvalidateRect, MONITOR_DEFAULTTONEAREST,
     MONITORINFO, MonitorFromPoint, NULL_PEN, PAINTSTRUCT, RoundRect, ScreenToClient, SelectObject,
-    SetBkMode, SetDCBrushColor, SetDCPenColor, SetTextColor, TRANSPARENT,
+    SetBkMode, SetDCBrushColor, SetDCPenColor, SetTextColor, TRANSPARENT, UpdateWindow,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
@@ -315,12 +316,21 @@ unsafe fn show_inner(
     // Windows 11 rounds popups itself; earlier versions return an error and the
     // square corners are what they have always looked like.
     let preference: i32 = DWMWCP_ROUND;
-    // SAFETY: the attribute is an `i32` of the documented size.
+    // The frame DWM draws around the panel follows the app mode, not the
+    // colours painted inside it; without this a dark panel has a light edge.
+    let dark: i32 = i32::from(panel.palette.is_dark());
+    // SAFETY: both attributes are `i32`s of the documented size.
     unsafe {
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_WINDOW_CORNER_PREFERENCE as u32,
             std::ptr::addr_of!(preference).cast(),
+            u32::try_from(size_of::<i32>()).unwrap_or(4),
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            std::ptr::addr_of!(dark).cast(),
             u32::try_from(size_of::<i32>()).unwrap_or(4),
         );
     }
@@ -445,7 +455,7 @@ impl Panel {
         self.commit(slider, u8::try_from(moved).unwrap_or(row.percent));
     }
 
-    /// Records a level, sends it to its displays, and repaints that row.
+    /// Records a level, paints it, and asks for it to be written.
     fn commit(&mut self, slider: usize, percent: u8) {
         let Some(row) = self.sliders.get_mut(slider) else {
             return;
@@ -459,18 +469,28 @@ impl Panel {
         let label = row.label;
         let track = row.track;
 
+        // Only the heading's number and this row's fill changed; repainting the
+        // whole panel would flicker every other slider.
+        let mut dirty = label;
+        dirty.bottom = track.bottom;
+        // The paint is forced here rather than left until the message queue is
+        // empty. A write can take a fifth of a second on a DDC/CI display, and
+        // if it went first the knob would not move until the monitor answered.
+        // SAFETY: `dirty` is a live rectangle in client coordinates and the
+        // window is alive for this message.
+        unsafe {
+            InvalidateRect(self.hwnd, &dirty, 0);
+            UpdateWindow(self.hwnd);
+        }
+
+        // Ask, do not write. The app hands this to a thread that is allowed to
+        // wait for the display; the message loop goes straight back to the
+        // pointer.
         // SAFETY: the panel exists only while the app does, and the app is not
         // borrowed by the message that reached here.
         unsafe {
             (*self.app).level(target, percent);
         }
-
-        // Only the heading's number changed; repainting the whole panel would
-        // repaint every other slider and flicker the one being dragged.
-        let mut dirty = label;
-        dirty.bottom = track.bottom;
-        // SAFETY: `dirty` is a live rectangle in client coordinates.
-        unsafe { InvalidateRect(self.hwnd, &dirty, 0) };
     }
 
     fn paint(&self) {

@@ -77,8 +77,8 @@ interface works and the difference is the link. Without that comparison,
 ## Ports
 
 macOS runs and is tested on real hardware. Linux and Windows are written,
-compiled and tested by CI on their own runners; the Windows agent has been
-started on one machine but not driven, and Linux has not been run at all — the
+compiled and tested by CI on their own runners; the Windows agent has been run
+on one machine and its drag measured, and Linux has not been run at all — the
 boxes that need a machine are unticked in [`PLAN.md`](PLAN.md).
 
 There are two tray agents, and they are separate programs rather than one with
@@ -175,19 +175,32 @@ agrees. A display that never agrees is reported once and left alone.
 
 ## In the notification area
 
-`klart-tray.exe` is the Windows agent. It puts a gold sun beside the sound icon
-and left or right clicking it opens a panel: a bar per display, one for all of
-them when there is more than one, then the rows for keeping their relative
-levels, starting at login, looking for displays again, and quitting. A wheel
-over a bar moves it five percent — the wheel is handled by the panel rather than
-by the icon, because Windows does not forward wheel messages to notification
-icons.
+`klart-tray.exe` is the Windows agent. It puts a gold sun in the notification
+area — beside the sound icon on Windows 11 — and left or right clicking it opens
+a panel: a bar per display, one for all of them when there is more than one, then
+the rows for keeping their relative levels, starting at login, looking for
+displays again, and quitting. A wheel over a bar moves it five percent — the
+wheel is handled by the panel rather than by the icon, because Windows does not
+forward wheel messages to notification icons.
+
+Windows puts a new notification icon in the overflow area by design, and no
+documented API overrides that. On Windows 11 22H2 and later the choice is stored
+per icon, so klart asks to be shown beside the clock on its first run — and only
+then: if the icon has been hidden in Settings, that choice is left alone.
+Windows 10 keeps the icon in the overflow until it is dragged out, which is what
+that system asks of every application.
 
 The panel is drawn rather than assembled from controls. A trackbar is a Windows
 control with its own idea of a theme, and on a hand-coloured popup it reads as a
 trackbar rather than as the bar the menu bar agent draws; drawing it also means
 a drag is one mouse move and a new fill width. Windows 11 rounds its corners
 through DWM, and Windows 10 draws it square, the way its own flyouts are.
+
+A drag repaints before it asks for anything, and the write is made by a
+background thread. A DDC/CI write takes about two hundred milliseconds on the
+monitor this was written against: fine for a display, not fine for a pointer.
+The thread keeps only the newest value for each display, so a fast drag skips
+the positions already left behind instead of replaying them.
 
 It is an agent in the same sense as the macOS one: no window, no taskbar button,
 and it stays running because a gamma ramp is reverted when the process that set

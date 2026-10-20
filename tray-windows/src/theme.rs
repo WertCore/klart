@@ -44,6 +44,15 @@ impl Palette {
         }
     }
 
+    /// Whether this is the dark palette.
+    ///
+    /// The popup is painted itself, but the window's border and shadow are
+    /// DWM's, and they are light unless it is told otherwise.
+    #[must_use]
+    pub fn is_dark(&self) -> bool {
+        self.background == Self::dark().background
+    }
+
     fn light() -> Self {
         Self {
             background: rgb(249, 249, 249),

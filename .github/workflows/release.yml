@@ -167,7 +167,7 @@ jobs:
           | --- | --- |
           | **macOS** | menu bar agent and command line, run on real hardware |
           | **Linux** | command line, compiled and tested by CI, **never run** |
-          | **Windows** | command line and notification-area agent, compiled and tested by CI; the panel has been started but not driven |
+          | **Windows** | command line and notification-area agent, compiled and tested by CI, and run on one Windows 11 machine; Windows 10 is untested |
 
           The menu bar is macOS's. Windows gets a notification-area agent of its
           own, which opens a hand-drawn panel rather than a menu because a Windows
@@ -257,8 +257,8 @@ jobs:
           ## Windows
 
           Unzip both files somewhere permanent and run `klart-tray.exe`. It sits
-          in the notification area — next to the sound icon, where Windows lets it
-          — and left or right clicking it opens a panel with a slider for each
+          in the notification area — next to the sound icon on Windows 11 — and
+          left or right clicking it opens a panel with a slider for each
           display, one for all of them, and the rows that keep their relative
           levels, start the agent at login, look for displays again, or quit. A
           wheel over a slider steps it by five percent.
@@ -273,6 +273,14 @@ jobs:
           like the bar the macOS agent draws. Windows 11 rounds its corners;
           Windows 10 draws it square, the way its own flyouts are.
 
+          Windows puts a new notification icon in the overflow area by design.
+          On Windows 11 22H2 and later klart asks to be shown beside the clock on
+          first run, and leaves the choice alone if you have hidden it in
+          Settings; Windows 10 keeps it in the overflow until it is dragged out.
+          A drag repaints immediately and the display is written on a background
+          thread, so a DDC/CI link that takes a fifth of a second does not hold
+          the pointer.
+
           Unsigned, so SmartScreen will warn on first run.
 
           ## If something does not work
@@ -281,7 +289,7 @@ jobs:
           back, and what it means — which of four causes, not merely that it
           failed.
 
-          Linux and the Windows agent have not been put through their paces on
-          real hardware. If either misbehaves, the probe output is the thing worth
-          reporting.
+          Linux has not been put through its paces on real hardware, and the
+          Windows agent has been used on one machine. If either misbehaves, the
+          probe output is the thing worth reporting.
           NOTES

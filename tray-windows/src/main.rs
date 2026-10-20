@@ -34,8 +34,10 @@ compile_error!(
 
 mod icon;
 mod panel;
+mod promote;
 mod theme;
 mod win;
+mod writer;
 
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
@@ -115,6 +117,13 @@ const DISPLAY_SETTLE: Duration = Duration::from_millis(700);
 /// of the two.
 const WAKE_SETTLE: Duration = Duration::from_millis(1200);
 
+/// How long to keep looking for Explorer's per-icon registry entry.
+///
+/// The key is not there at the instant `Shell_NotifyIcon` returns; Explorer
+/// writes it a moment later. Ten seconds is long enough for a busy login and
+/// short enough that a shell which never writes it is not polled forever.
+const PROMOTE_WINDOW: Duration = Duration::from_secs(10);
+
 fn main() -> ExitCode {
     // Per-monitor v2 before any window exists, so the popup is laid out in the
     // real pixels of the monitor it lands on and Windows does not bitmap-stretch
@@ -144,6 +153,10 @@ struct App {
     /// it is not. It exists to receive the icon's callbacks and the broadcasts
     /// that say a display, a theme or the shell has changed.
     driver: Driver,
+    /// The displays' writes, on a thread that is allowed to block in a monitor.
+    /// [`None`] when that thread could not be started, in which case the driver
+    /// is asked directly and a drag is as slow as the monitor.
+    writer: Option<writer::Writer>,
     icon: *mut core::ffi::c_void,
     /// Whether [`App::icon`] came from [`icon::sun`] and must be destroyed, or
     /// is a shared system icon that must not be.
@@ -171,6 +184,9 @@ struct App {
     closed_at: Option<Instant>,
     /// When to enumerate the displays again, if the set is about to change.
     refresh_at: Option<Instant>,
+    /// When to give up waiting for Explorer to register the icon, so that it can
+    /// be promoted out of the overflow area.
+    promote_until: Option<Instant>,
     /// Whether a wake is waiting for its enumeration before the levels go back.
     wake_pending: bool,
     timer: usize,
@@ -202,6 +218,9 @@ impl App {
         // Before the first panel is opened, so its levels are the ones the
         // displays are sitting at, and before anything is drawn.
         driver.restore();
+        // After the restore, so two sets of controls are not asking one DDC/CI
+        // link for the display at the same time.
+        let writer = writer::Writer::start();
 
         // SAFETY: called on the thread that will run the message loop, which is
         // where GDI objects and `CreateIconIndirect` belong.
@@ -217,6 +236,7 @@ impl App {
         let mut app = Box::new(Self {
             hwnd: std::ptr::null_mut(),
             driver,
+            writer,
             icon,
             icon_owned,
             icon_added: false,
@@ -228,6 +248,7 @@ impl App {
             double_clicked: false,
             closed_at: None,
             refresh_at: None,
+            promote_until: None,
             wake_pending: false,
             timer: 0,
         });
@@ -339,6 +360,26 @@ impl App {
 
         self.nid = data;
         self.icon_added = true;
+        self.promote();
+    }
+
+    /// Gives the Windows 11 icon a chance to sit beside the clock.
+    ///
+    /// Explorer creates the per-icon registry entry a moment after the icon is
+    /// added, so an attempt that finds nothing is retried for
+    /// [`PROMOTE_WINDOW`]. A `0` already there is the person having hidden klart
+    /// in Settings, and is not overwritten.
+    fn promote(&mut self) {
+        match promote::ensure_visible() {
+            promote::Outcome::Waiting => {
+                if self.promote_until.is_none() {
+                    self.promote_until = Some(Instant::now() + PROMOTE_WINDOW);
+                }
+            }
+            promote::Outcome::Promoted
+            | promote::Outcome::Chosen
+            | promote::Outcome::Unavailable => self.promote_until = None,
+        }
     }
 
     /// Takes the icon out of the notification area.
@@ -356,17 +397,41 @@ impl App {
     ///
     /// Reached from the panel through the raw pointer it holds, which is why it
     /// takes `&self`: nothing here changes the agent's own state, only what the
-    /// driver has been asked for.
+    /// displays have been asked for. With a writer thread this returns as soon
+    /// as the channel has the value — the monitor is not the panel's to wait
+    /// for.
     fn level(&self, target: Target, percent: u8) {
+        let Some(writer) = self.writer.as_ref() else {
+            match target {
+                Target::All => self.driver.request_all(percent),
+                Target::Display(display) => self.driver.request(display, percent),
+            }
+            return;
+        };
+
         match target {
-            Target::All => self.driver.request_all(percent),
-            Target::Display(display) => self.driver.request(display, percent),
+            Target::All => {
+                // The driver decides what each display becomes in relative
+                // mode; the writer only carries the result.
+                for (display, level) in self.driver.plan_all(percent) {
+                    self.driver.note(display, level);
+                    writer.set(display, level);
+                }
+            }
+            Target::Display(display) => {
+                self.driver.note(display, percent);
+                writer.set(display, percent);
+            }
         }
     }
 
-    /// Lands the last value of a drag, which the rate limiter may have held.
+    /// Lands the last value of a drag, when the driver wrote it itself.
+    ///
+    /// A writer has nothing held back: the last value sent is the one it writes.
     fn flush(&self) {
-        self.driver.flush();
+        if self.writer.is_none() {
+            self.driver.flush();
+        }
     }
 
     /// Lands whatever a drag could not and gives the driver a turn.
@@ -377,6 +442,15 @@ impl App {
 
         if !self.icon_added {
             self.add_icon();
+        }
+
+        if self
+            .promote_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            self.promote();
+        } else if self.promote_until.is_some() {
+            self.promote_until = None;
         }
 
         if self.refresh_at.is_some_and(|at| Instant::now() >= at) {
@@ -575,6 +649,13 @@ impl App {
         match controls() {
             Ok(found) => self.driver.replace(found),
             Err(problem) => eprintln!("klart-tray: {problem}"),
+        }
+
+        // The writer's indices mean the old set until it has enumerated too, and
+        // a display that was unplugged must not be written to the one that took
+        // its place.
+        if let Some(writer) = self.writer.as_ref() {
+            writer.refresh();
         }
 
         // A display that has just appeared has whatever level it powered on
