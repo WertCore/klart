@@ -77,11 +77,18 @@ interface works and the difference is the link. Without that comparison,
 ## Ports
 
 macOS runs and is tested on real hardware. Linux and Windows are written,
-compiled and tested by CI on their own runners, and have never been run — the
+compiled and tested by CI on their own runners; the Windows agent has been
+started on one machine but not driven, and Linux has not been run at all — the
 boxes that need a machine are unticked in [`PLAN.md`](PLAN.md).
 
-The menu bar agent is macOS only. A tray elsewhere is StatusNotifierItem over
-D-Bus or `Shell_NotifyIcon`, which is a new crate rather than a `cfg`.
+There are two tray agents, and they are separate programs rather than one with
+`cfg` branches: `klart-tray` is AppKit, and `klart-tray-windows` is
+`Shell_NotifyIcon` with a hand-drawn panel instead of a menu, because a Windows
+menu cannot hold a slider that is dragged. What they do share is
+`klart-tray-common` — the write rate limiting, the remembered levels and the
+restore after a wake — so those cannot drift apart between the platforms. A tray
+for Linux is still StatusNotifierItem over D-Bus or the legacy XEmbed protocol,
+and is a third crate rather than a variant of either.
 
 `DisplayKey` is portable by contract — its derivation is seven numbered rules,
 each with a test, over EDID fields every operating system can read. A
@@ -166,6 +173,26 @@ accepted and dropped — the link returns before the panel behind it does. So th
 agent writes, reads back, and keeps trying for a few seconds until the display
 agrees. A display that never agrees is reported once and left alone.
 
+## In the notification area
+
+`klart-tray.exe` is the Windows agent. It puts a gold sun beside the sound icon
+and left or right clicking it opens a panel: a bar per display, one for all of
+them when there is more than one, then the rows for keeping their relative
+levels, starting at login, looking for displays again, and quitting. A wheel
+over a bar moves it five percent — the wheel is handled by the panel rather than
+by the icon, because Windows does not forward wheel messages to notification
+icons.
+
+The panel is drawn rather than assembled from controls. A trackbar is a Windows
+control with its own idea of a theme, and on a hand-coloured popup it reads as a
+trackbar rather than as the bar the menu bar agent draws; drawing it also means
+a drag is one mouse move and a new fill width. Windows 11 rounds its corners
+through DWM, and Windows 10 draws it square, the way its own flyouts are.
+
+It is an agent in the same sense as the macOS one: no window, no taskbar button,
+and it stays running because a gamma ramp is reverted when the process that set
+it exits. The sleep restore above is the same code, from `klart-tray-common`.
+
 ## Status
 
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per
@@ -230,11 +257,15 @@ which display and why the others did not.
 
 #### Windows
 
+Unzip both files somewhere permanent.
+
 ```
-klart.exe list
+klart.exe list      # the command line
+klart-tray.exe      # the agent; "Start at login" keeps it there
 ```
 
-Unsigned, so SmartScreen warns on first run.
+The agent sits in the notification area and opens the panel described above.
+Both binaries are unsigned, so SmartScreen warns on first run.
 
 ## Building
 

@@ -1,0 +1,42 @@
+[package]
+name = "klart-tray-windows"
+description = "Notification-area agent for klart on Windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "klart-tray"
+path = "src/main.rs"
+
+[dependencies]
+klart-core.workspace = true
+klart-tray-common.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", default-features = false, features = [
+    "Win32_Foundation",
+    # The notification area: `Shell_NotifyIcon` and the identifier that finds
+    # the icon's rectangle again when the panel is placed.
+    "Win32_UI_Shell",
+    # The hidden message window, the popup, and the messages both handle.
+    "Win32_UI_WindowsAndMessaging",
+    # Capture and focus, so a drag keeps reporting after the pointer leaves the
+    # slider it started on.
+    "Win32_UI_Input_KeyboardAndMouse",
+    # `SetProcessDpiAwarenessContext`, and the DPI of the monitor the panel is
+    # about to sit on.
+    "Win32_UI_HiDpi",
+    # The panel is drawn by hand: brushes, rounded rectangles, text and the DIB
+    # the tray icon is rendered into.
+    "Win32_Graphics_Gdi",
+    # Rounded corners on Windows 11, where the API is there; ignored where it is
+    # not.
+    "Win32_Graphics_Dwm",
+    "Win32_System_LibraryLoader",
+    # Taskbar and menu theme, which decides whether the panel is light or dark.
+    "Win32_System_Registry",
+] }

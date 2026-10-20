@@ -21,11 +21,9 @@ compile_error!(
 );
 
 mod chord;
-mod driver;
 mod hud;
 mod keys;
 mod menu;
-mod request;
 mod scroll;
 mod status;
 mod wake;
@@ -37,6 +35,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use klart_core::controls;
+use klart_tray_common::driver::Driver;
+use klart_tray_common::request::{self, Request};
 use objc2::rc::Retained;
 use objc2_app_kit::NSStatusItem;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
@@ -46,9 +46,7 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{MainThreadMarker, NSDate, NSDefaultRunLoopMode};
 
-use crate::driver::Driver;
 use crate::menu::Built;
-use crate::request::Request;
 
 /// How long the pump waits before looking around of its own accord.
 ///

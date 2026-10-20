@@ -1009,3 +1009,63 @@ about it would have been worse than either being wrong alone.
 Run against this machine's own displays, and the output parsed back. The case
 this hardware cannot produce — a single display, with no corroboration to
 report — is covered by a test instead.
+
+## 31. A notification-area agent for Windows
+
+- [x] `klart-tray-windows`, with `klart-tray.exe` as its binary
+- [x] Move the rate limiter, remembered levels and wake restore into
+      `klart-tray-common`, so both agents run the same code
+- [x] A sun drawn into an alpha bitmap at whatever size the notification area
+      asks for, rather than a fixed `.ico`
+- [x] A popup panel drawn by hand: one bar per display, a combined bar, and the
+      same commands the macOS menu carries
+- [x] CI builds, tests and documents the Windows agent; the release zip carries
+      both `klart.exe` and `klart-tray.exe`
+- [ ] The icon appears beside the sound icon, and opens the panel on a click
+- [ ] A drag on a per-display bar changes that display while it is dragged
+- [ ] The combined bar moves every display, in both absolute and relative modes
+- [ ] The wheel over a bar steps it, and the panel closes on Escape or a click
+      outside
+- [ ] "Start at login" survives a sign-out, and "Quit klart" removes the icon
+- [ ] Light and dark mode both draw legibly, including after the mode changes
+      while the agent is running
+- [ ] A monitor plugged in or removed is noticed, and the panel is placed on the
+      right monitor at 100%, 150% and 200%
+- [ ] Levels come back after a sleep, read back rather than assumed
+
+A Windows menu cannot hold a slider. `muda` has no item of that shape, and an
+owner-drawn `MENUITEMINFO` hands its drag messages to the menu's own modal loop,
+so the value would arrive after the drag rather than during it. The tray agent is
+therefore a popup window of its own, painted with GDI: a rounded track, a filled
+portion and a knob, which is the same shape the macOS menu draws with AppKit.
+A trackbar was the obvious alternative and was not taken: it brings its own idea
+of a theme, and on a hand-coloured surface in dark mode it reads as a control
+from another program.
+
+The icon is drawn rather than shipped as an `.ico`. macOS uses `sun.max`, which
+is a template image, and Windows has no template images for notification icons —
+so there is no single `.ico` that is legible on both a light and a dark taskbar.
+A warm gold sun with an alpha channel is, and drawing it from one description
+means it is sharp at 16, 20, 24 and 32 pixels rather than scaled from one size.
+
+Two things were not obvious and are worth recording. `Shell_NotifyIcon` does not
+forward wheel messages to the icon, so scrolling over the sun cannot work the way
+it does over the macOS status item; the wheel is handled by the open panel
+instead, over whichever bar the pointer is on. And version 4 of the notification
+protocol delivers one click as more than one message, so a double click would
+open the panel and immediately close it. There is a short window after a click in
+which a second one is the same gesture rather than a new one.
+
+The shared half moved rather than being copied. Rate limiting a DDC/CI link,
+remembering a level against a display key, and writing-read-back-and-retry after
+a wake are not a platform's business, and two copies would drift — macOS already
+had the better part of a year of fixes in them. `klart-tray-common` now holds
+`driver` and `request`; the macOS menu and the Windows panel each keep only what
+the other platform has no equivalent for.
+
+What is unticked is what needs a machine with a monitor and a person in front of
+it: none of the drawing, placement or drag handling has been watched. The agent
+starts and stays running here, and the unit tests cover the geometry, the
+colour packing, the icon rasteriser and the shared driver's rules — but a test
+suite has no taskbar. The macOS half of the extraction is likewise the CI's to
+prove: it cannot be compiled on Windows.

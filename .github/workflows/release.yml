@@ -33,9 +33,9 @@ jobs:
         run: |
           set -euo pipefail
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo test --workspace --all-features
-          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+          cargo clippy --workspace --exclude klart-tray-windows --all-targets --all-features -- -D warnings
+          cargo test --workspace --exclude klart-tray-windows --all-features
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude klart-tray-windows --no-deps
 
       - name: Bundle
         id: bundle
@@ -78,14 +78,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # `klart-tray` is AppKit and says so, so the portable half is named
-      # explicitly. The tests run here rather than being taken on trust from
-      # another platform's run.
+      # `klart-tray` is AppKit and `klart-tray-windows` is Win32, so the
+      # portable half is named explicitly. The tests run here rather than being
+      # taken on trust from another platform's run.
       - name: Gates
         run: |
           set -euo pipefail
-          cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
-          cargo test -p klart-core -p klart-cli --all-features
+          cargo clippy -p klart-core -p klart-cli -p klart-tray-common --all-targets --all-features -- -D warnings
+          cargo test -p klart-core -p klart-cli -p klart-tray-common --all-features
 
       - name: Build and archive
         shell: bash
@@ -116,19 +116,20 @@ jobs:
 
       - name: Gates
         run: |
-          cargo clippy -p klart-core -p klart-cli --all-targets --all-features -- -D warnings
-          cargo test -p klart-core -p klart-cli --all-features
+          cargo clippy -p klart-core -p klart-cli -p klart-tray-common -p klart-tray-windows --all-targets --all-features -- -D warnings
+          cargo test -p klart-core -p klart-cli -p klart-tray-common -p klart-tray-windows --all-features
 
       - name: Build and archive
         shell: bash
         run: |
           set -euo pipefail
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
-          cargo build --release -p klart-cli
+          cargo build --release -p klart-cli -p klart-tray-windows
           mkdir -p dist
           # Zip rather than tar: Explorer opens one without a third-party tool
-          # and not the other.
-          7z a "dist/klart-${version}-windows-x86_64.zip" ./target/release/klart.exe
+          # and not the other. Both binaries go in, because one without the
+          # other is a program that lists displays but cannot keep one dim.
+          7z a "dist/klart-${version}-windows-x86_64.zip" ./target/release/klart.exe ./target/release/klart-tray.exe
 
       - uses: actions/upload-artifact@v7
         with:
@@ -166,10 +167,13 @@ jobs:
           | --- | --- |
           | **macOS** | menu bar agent and command line, run on real hardware |
           | **Linux** | command line, compiled and tested by CI, **never run** |
-          | **Windows** | command line, compiled and tested by CI, **never run** |
+          | **Windows** | command line and notification-area agent, compiled and tested by CI; the panel has been started but not driven |
 
-          The menu bar agent is macOS only. A tray elsewhere is StatusNotifierItem
-          over D-Bus or `Shell_NotifyIcon`, which is a new program rather than a
+          The menu bar is macOS's. Windows gets a notification-area agent of its
+          own, which opens a hand-drawn panel rather than a menu because a Windows
+          menu cannot hold a slider that is dragged. Linux still has no tray: a
+          tray there is StatusNotifierItem over D-Bus or the legacy XEmbed
+          protocol depending on the desktop, which is a new program rather than a
           build flag.
 
           That table is about platforms. Individual features can be newer than
@@ -252,9 +256,22 @@ jobs:
 
           ## Windows
 
+          Unzip both files somewhere permanent and run `klart-tray.exe`. It sits
+          in the notification area — next to the sound icon, where Windows lets it
+          — and left or right clicking it opens a panel with a slider for each
+          display, one for all of them, and the rows that keep their relative
+          levels, start the agent at login, look for displays again, or quit. A
+          wheel over a slider steps it by five percent.
+
           ```
-          klart.exe list
+          klart.exe list          # the command line, unchanged
+          klart-tray.exe          # the agent; "Start at login" keeps it there
           ```
+
+          The panel is drawn by the agent rather than assembled from menu items:
+          a trackbar is a control with its own idea of a theme and does not look
+          like the bar the macOS agent draws. Windows 11 rounds its corners;
+          Windows 10 draws it square, the way its own flyouts are.
 
           Unsigned, so SmartScreen will warn on first run.
 
@@ -264,6 +281,7 @@ jobs:
           back, and what it means — which of four causes, not merely that it
           failed.
 
-          Linux and Windows have never been run on real hardware. If either
-          misbehaves, the probe output is the thing worth reporting.
+          Linux and the Windows agent have not been put through their paces on
+          real hardware. If either misbehaves, the probe output is the thing worth
+          reporting.
           NOTES

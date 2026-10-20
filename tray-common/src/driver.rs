@@ -386,13 +386,11 @@ impl Driver {
     }
 
     /// Which display holds the point, in the global top-left coordinates that
-    /// both [`CGEventGetLocation`] and [`crate::driver`]'s bounds are given in.
+    /// both `CGEventGetLocation` and [`crate::driver`]'s bounds are given in.
     ///
     /// Falls back to the main display, then to the first, so a key always lands
     /// somewhere even when the pointer is over a display klart cannot see or the
     /// bounds are unknown (as on a platform that does not report them).
-    ///
-    /// [`CGEventGetLocation`]: objc2_core_graphics::CGEvent::location
     pub fn display_at(&self, x: i32, y: i32) -> usize {
         let controls = self.controls.borrow();
 

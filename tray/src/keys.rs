@@ -34,7 +34,7 @@ use objc2_core_graphics::{
     CGEventType,
 };
 
-use crate::driver::Driver;
+use klart_tray_common::driver::Driver;
 
 /// The `CGEventType` of a system-defined event, which is what a media key is.
 /// The cut-down binding names `KeyDown` but not this; `NX_SYSDEFINED` is 14.
