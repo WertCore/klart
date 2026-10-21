@@ -1027,7 +1027,7 @@ report — is covered by a test instead.
 - [ ] The wheel over a bar steps it, and the panel closes on Escape or a click
       outside
 - [ ] "Start at login" survives a sign-out, and "Quit klart" removes the icon
-- [x] Light and dark mode both draw legibly, including after the mode changes
+- [ ] Light and dark mode both draw legibly, including after the mode changes
       while the agent is running
 - [ ] A monitor plugged in or removed is noticed, and the panel is placed on the
       right monitor at 100%, 150% and 200%
