@@ -192,7 +192,30 @@ impl Driver {
     }
 
     /// Takes a new set of displays, discarding anything owed to the old ones.
+    ///
+    /// A display that has gone, or one whose mechanism has changed — which is
+    /// what happens when HDR is switched on or off — must not leave a gamma ramp
+    /// or an overlay behind. Give the old half back first when either is true.
+    /// A display that merely came back through the same mechanism is left
+    /// alone: its ramp or window is still the one the new control will use, and
+    /// releasing it would flash the screen for no change.
     pub fn replace(&self, controls: Vec<Control>) {
+        {
+            let current = self.controls.borrow();
+            for control in current.iter() {
+                let still_here = controls.iter().any(|replacement| {
+                    replacement.display().key() == control.display().key()
+                        && replacement.mechanism() == control.mechanism()
+                });
+                if still_here || control.mechanism().is_none() {
+                    continue;
+                }
+                if let Err(problem) = control.release() {
+                    eprintln!("klart-tray: {}: {problem}", control.name());
+                }
+            }
+        }
+
         *self.last_written.borrow_mut() = vec![far_enough_back(); controls.len()];
         *self.controls.borrow_mut() = controls;
         self.pending.set(None);
@@ -212,8 +235,11 @@ impl Driver {
     /// remembers its own setting, through a reconnect and through a reboot, so
     /// there is nothing to put back — and putting one back anyway would overrule
     /// whatever the person did with the brightness keys or the monitor's own
-    /// buttons since. A display dimmed with its gamma ramp really has lost the
-    /// setting, every time this process exits, and is the case this exists for.
+    /// buttons since. A display whose level is held by software is the case
+    /// this exists for: macOS reverts the ramp when the process exits, an
+    /// overlay is a window with no owner, and the agent gives a Windows ramp
+    /// back on the way out. That includes a display below the backlight's floor
+    /// and one whose only mechanism is software.
     ///
     /// `klart restore` on the command line does restore everything, because
     /// there it was asked for rather than assumed.
@@ -222,14 +248,83 @@ impl Driver {
         let remembered = self.remembered.borrow();
 
         for control in controls.iter() {
-            if control.persists() {
-                continue;
+            // A Windows gamma ramp outlives its process, unlike the macOS one,
+            // but a control that *is* the software half still has a remembered
+            // level worth putting back after a clean quit released it. A
+            // backlight-only control has nothing to restore: its own buttons are
+            // the authority.
+            let software_only = matches!(control.mechanism(), Some("gamma" | "overlay"));
+            let mut fresh = false;
+
+            if control.persists() && !software_only {
+                // A combined control at exactly its seam has the whole setting
+                // in the backlight and reports that it persists — but the
+                // remembered level may have been below the seam, and a clean
+                // quit released the software half. Restoring that level is the
+                // one case where a persistent combined control still has
+                // something to put back. Above the seam, the backlight is the
+                // authority and is left alone.
+                let Some(seam) = control.seam() else {
+                    continue;
+                };
+                let current = control.get();
+                fresh = true;
+                let at_seam = current.is_ok_and(|current| current.percent_rounded() <= seam);
+                if !at_seam {
+                    continue;
+                }
             }
             let Some(level) = remembered.level_for(control.display().key()) else {
                 continue;
             };
+
+            // A replacement can have opened while the old software half was
+            // still scaled; reading first makes the skipped-write cache agree
+            // with what is actually on the display.
+            if !fresh {
+                let _ = control.get();
+            }
             if let Err(problem) = control.set(level) {
                 eprintln!("klart-tray: {}: {problem}", control.name());
+            }
+        }
+    }
+
+    /// Gives back anything the controls are holding for this process.
+    ///
+    /// Called when the agent is about to exit. A backlight has nothing to give
+    /// back, but a gamma ramp left scaled by a process that is no longer running
+    /// would persist until something else changed it, and an overlay would be a
+    /// window with no owner left to move it. Each control decides what it owes;
+    /// one that cannot give it back is reported rather than allowed to abort the
+    /// rest of the release.
+    pub fn release(&self) {
+        let controls = self.controls.borrow();
+
+        for control in controls.iter() {
+            if control.mechanism().is_none() {
+                continue;
+            }
+            if let Err(problem) = control.release() {
+                eprintln!("klart-tray: {}: {problem}", control.name());
+            }
+        }
+    }
+
+    /// Records where every display is now.
+    ///
+    /// Used after releasing software dimming: the remembered level was the one
+    /// the software half was asked for, and after the release the display is at
+    /// the level the backlight alone provides. Remembering that instead keeps a
+    /// restart from putting the old, darker level straight back.
+    pub fn remember_current(&self) {
+        let controls = self.controls.borrow();
+
+        for control in controls.iter() {
+            if let Ok(level) = control.get() {
+                self.remembered
+                    .borrow_mut()
+                    .remember(control.display().key(), level);
             }
         }
     }

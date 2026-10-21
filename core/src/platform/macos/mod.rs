@@ -120,10 +120,19 @@ pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> 
     let ramp = Gamma::open(display)?;
 
     match backlight {
-        Some(backlight) => Ok((
-            Box::new(Combined::new(backlight, Box::new(ramp))?),
-            refusals,
-        )),
+        Some(backlight) => {
+            let hardware_level = backlight.get()?;
+            let software_level = ramp.get()?;
+            Ok((
+                Box::new(Combined::from_levels(
+                    backlight,
+                    Box::new(ramp),
+                    hardware_level,
+                    software_level,
+                )),
+                refusals,
+            ))
+        }
         None => Ok((Box::new(ramp), refusals)),
     }
 }

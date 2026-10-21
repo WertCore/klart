@@ -87,8 +87,9 @@ impl Control {
 
     /// Whether a change made here outlives the process that made it.
     ///
-    /// False on the gamma ramp. Worth showing rather than hiding: it is the
-    /// difference between a command that works and one that appears to.
+    /// False for the macOS gamma ramp and for an HDR overlay; true for a Windows
+    /// gamma ramp and for a backlight. Worth showing rather than hiding: it is
+    /// the difference between a command that works and one that appears to.
     #[must_use]
     pub fn persists(&self) -> bool {
         // A display nothing reaches has nothing that could be lost, so there is
@@ -106,6 +107,24 @@ impl Control {
     #[must_use]
     pub fn refusals(&self) -> &[Error] {
         &self.refusals
+    }
+
+    /// Where a hardware floor meets a software fallback, as a percentage.
+    ///
+    /// [`None`] for a control that has only one mechanism. A composed control
+    /// is one whose lower range dims the picture rather than the backlight.
+    #[must_use]
+    pub fn seam(&self) -> Option<u8> {
+        self.backend.as_ref().and_then(|backend| backend.seam())
+    }
+
+    /// Gives back anything the mechanism is holding for this process.
+    ///
+    /// # Errors
+    ///
+    /// As the underlying [`Backend`].
+    pub fn release(&self) -> Result<()> {
+        self.reachable()?.release()
     }
 
     /// Reads the display's current level.

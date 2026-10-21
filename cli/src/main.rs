@@ -313,7 +313,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if changed {
-        render::warn_about_anything_that_will_not_last(&reported);
+        render::warn_about_software_dimming(&reported);
     }
     Ok(())
 }

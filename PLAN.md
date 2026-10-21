@@ -1143,3 +1143,50 @@ still `klart-tray`, `tray/windows` is still `klart-tray-windows` with a
 `klart-tray.exe` binary, and `tray/common` is still `klart-tray-common`. The
 packaging script now names the two macOS binaries rather than building the
 workspace, which would have stopped in the Windows crate's `compile_error!`.
+
+## 34. Past the backlight floor on Windows
+
+- [x] Compose the backlight with the software half on Windows, with the same
+      quarter-width seam as macOS
+- [x] Use a baseline-preserving gamma ramp when HDR is definitely off
+- [x] Use a per-display overlay when HDR is on or cannot be read
+- [x] Save the original ramp in `gamma.conf` before the first scaled write, and
+      remove the entry when the ramp is given back
+- [x] Release software dimming on quit and from a panel row; remember the
+      resulting seam level after a reset
+- [x] Draw the seam tick and the "below 25% dims the picture" note, and keep the
+      panel above an overlay while it is open
+- [x] Drag below the seam on a real SDR panel, reset it, quit, and restart it
+- [ ] Run the overlay path on a display that is actually in HDR
+
+The composition itself was already platform-free; what Windows needed was the
+software half and the rules for holding and giving it back. Above 25% the Monitor
+Configuration API or WMI moves the backlight. Below it the backlight stays at its
+own minimum and the remaining range goes to a gamma ramp in SDR, or to a black
+layered window when HDR is on or unknown. The gamma ramp is a scaled copy of
+whatever was there first, read back and compared rather than trusted, so an ICC
+profile or Night Light curve is put back unchanged. Its original is written to
+`%APPDATA%\klart\gamma.conf` before the scaled ramp, which is what makes recovery
+from a crash possible without a resident process.
+
+Two Windows-specific traps were found by running it. A gamma ramp outlives its
+process, unlike macOS, so the agent cannot rely on exit to undo it: the tray's
+reset and quit paths both release the software half, and the writer thread waits
+for its release acknowledgement rather than timing out while the state is being
+saved. And a display-change broadcast is *sent* to top-level windows, not posted
+to a queue, so the overlay manager needed a hidden host window with its own
+procedure to turn `WM_DISPLAYCHANGE` into a posted command; otherwise an overlay
+could remain over a rectangle that no longer belonged to any monitor. Re-enumerating
+also releases an old software half when a display has gone or its mechanism has
+changed, so switching HDR on or off cannot leave a scaled gamma ramp underneath
+a new overlay. The panel is topmost and the overlay is placed directly below it
+while open, so the slider is never dimmed out of reach.
+
+On the monitor this was written against (`LS32AG55x`, SDR, DDC/CI), a synthetic
+drag on the real panel reached 8%, wrote the identity baseline to `gamma.conf`,
+and the panel showed the seam tick at 25%. Reset released the ramp and left
+`levels.conf` at 25 instead of re-remembering 8. Quit released the ramp and
+exited; the next start restored 8% and wrote the baseline entry again. The
+overlay path was exercised against a real display, including hiding on a posted
+display change, but HDR itself was off, so the unticked box is the one that
+needs an HDR panel rather than another test.

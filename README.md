@@ -61,7 +61,7 @@ work":
 | --- | --- | --- |
 | `Answers` | DDC/CI is working on this display. | Nothing. |
 | `MonitorDeclines` | Two addresses answered differently, so transactions are reaching the monitor — and it is refusing DDC/CI itself. Most ship with it off. | Turn on DDC/CI, Monitor Control, External Control or PC Control in the monitor's own menu. |
-| `HdrInTheWay` | The display is in HDR, and brightness control did not answer. Those go together: an HDR picture mode commonly pins brightness or stops honouring the feature. Windows only. | Turn HDR off, or set the level in the monitor's own menu. Software dimming is not a way round it — Windows does not guarantee gamma ramp behaviour under HDR either. |
+| `HdrInTheWay` | The display is in HDR, and brightness control did not answer. Those go together: an HDR picture mode commonly pins brightness or stops honouring the feature. Windows only. | Turn HDR off to regain the backlight, or set the level in the monitor's own menu. klart's HDR fallback is a black overlay below the hardware floor: it can darken the desktop, not raise a pinned brightness. |
 | `EdidOnly` | The link serves a cached EDID and does no I2C. The monitor is never asked, so this is *not* its DDC/CI setting and no software can change it. | Use a link with no protocol conversion: USB-C to DisplayPort, into the monitor's DisplayPort input. |
 | `NoI2c` | Nothing could be read over this link at all, not even the EDID. Something between the Mac and the monitor is not passing I2C. | A different cable, preferably with no conversion in it. |
 | `NoChannel` | No I2C channel on this machine at all — what a virtual screen looks like: AirPlay, Sidecar, DisplayLink. None carry DDC/CI by design. | Software dimming is the only option, and `klart` falls back to it. |
@@ -78,8 +78,9 @@ interface works and the difference is the link. Without that comparison,
 
 macOS runs and is tested on real hardware. Linux and Windows are written,
 compiled and tested by CI on their own runners; the Windows agent has been run
-on one machine and its drag measured, and Linux has not been run at all — the
-boxes that need a machine are unticked in [`PLAN.md`](PLAN.md).
+on one machine, and its drag, below-minimum dimming and recovery were checked
+there. Linux has not been run at all — the boxes that need a machine are
+unticked in [`PLAN.md`](PLAN.md).
 
 There are two tray agents, and they are separate programs rather than one with
 `cfg` branches: `klart-tray` is AppKit, and `klart-tray-windows` is
@@ -96,7 +97,7 @@ variant of either.
 each with a test, over EDID fields every operating system can read. A
 configuration written on one is meant to be readable on another.
 
-## Why this is three mechanisms rather than one
+## Why macOS is three mechanisms rather than one
 
 There is no single brightness API on macOS, so there is no single backend here.
 
@@ -110,6 +111,35 @@ Both hardware paths are private, undocumented Apple interfaces. There is no
 supported alternative that reaches an external monitor's backlight, and this is
 what every tool in this space uses, but it is worth knowing before depending on
 it: a macOS release can take either away.
+
+Windows has the same shape with public APIs: the Monitor Configuration API for
+external monitors, WMI for the machine's own panel, and a software half — a
+gamma ramp in SDR, an overlay in HDR — for the range below the backlight. There
+is no `DisplayServices` equivalent to worry about, and the driver does the
+DDC/CI framing itself.
+
+## Dimming below the backlight
+
+A backlight has a minimum, and in a dark room that minimum can still be too
+bright. Below it klart holds the backlight at that minimum and dims the picture
+instead. The bottom quarter of every slider is that software range; above it the
+backlight does the work and the picture is left alone. At exactly 25% the two
+halves meet at the same display state, so crossing the seam does not jump.
+
+The software half is a gamma ramp when Windows is definitely in SDR. It is a
+copy of the ramp that was already there, scaled down, so an ICC calibration or a
+Night Light curve is preserved rather than replaced. In HDR — and when HDR
+cannot be read at all — Windows does not promise what a gamma ramp does, so
+klart uses a click-through black window over the display instead. That overlay
+can only darken what is composited into the desktop, so an exclusive-fullscreen
+game can sit outside it, and it is not a way to make an HDR picture brighter.
+
+A Windows gamma ramp outlives the command that set it. Before the first scaled
+write, klart saves the original in `%APPDATA%\klart\gamma.conf`, keyed by
+display; a crash can be recovered with `klart set 100`, and the file is removed
+when the ramp is given back. The software floor is 20% of the picture, so even a
+process that dies below the seam cannot leave a black screen. Overlay windows
+vanish with the process that owns them.
 
 ## Using it
 
@@ -135,12 +165,14 @@ $ klart rename 1 "Desk monitor"
 Commands act on the main display — the one with the menu bar, on macOS — unless told otherwise.
 `--display` takes an index, a key, or part of a name.
 
-A `*` on the mechanism means the change does not outlive the command — see the
-gamma row of the table above.
+A `*` on the mechanism means the change does not outlive the command. On macOS
+that is a gamma ramp, which the window server puts back; on Windows it is an HDR
+overlay window, which goes away with the process.
 
-Levels are remembered in `~/Library/Application Support/klart/levels.conf`, keyed
-by display rather than by port, so they survive a reconnect. The file is meant to
-be edited by hand. A key beginning with `:` is a setting rather than a display;
+Levels are remembered in `~/Library/Application Support/klart/levels.conf` on
+macOS and `%APPDATA%\klart\levels.conf` on Windows, keyed by display rather than
+by port, so they survive a reconnect. The file is meant to be edited by hand. A
+key beginning with `:` is a setting rather than a display;
 `:combined` is the only one, and it chooses what the menu's all-displays slider
 does:
 
@@ -182,9 +214,18 @@ beside the sound icon on Windows 11 — in the same white or black as the system
 own icons, and redraws it when Windows mode changes. Left or right clicking it
 opens a panel: a bar per display, one for all of them when there is more than
 one, then the rows for keeping their relative levels, starting at login, looking
-for displays again, and quitting. A wheel over a bar moves it five percent — the
-wheel is handled by the panel rather than by the icon, because Windows does not
-forward wheel messages to notification icons.
+for displays again, resetting software dimming, and quitting. A wheel over a bar
+moves it five percent — the wheel is handled by the panel rather than by the
+icon, because Windows does not forward wheel messages to notification icons.
+
+A bar with a hardware and software half has a tick at 25% and a note saying that
+below it the picture is dimmed rather than the backlight. That lower range is
+held by a gamma ramp in SDR or by an overlay in HDR; the overlay sits below this
+panel while it is open, so opening the panel never hides the control under the
+dimming. Quitting releases the software half, leaving the backlight at its
+floor, and the next start restores the remembered level. “Reset software
+dimming” does the same immediately without quitting, and remembers the resulting
+25% level so the next start does not put the darker level straight back.
 
 Windows puts a new notification icon in the overflow area by design, and no
 documented API overrides that. On Windows 11 22H2 and later the choice is stored
@@ -206,11 +247,11 @@ The thread keeps only the newest value for each display, so a fast drag skips
 the positions already left behind instead of replaying them.
 
 It is an agent in the same sense as the macOS one: no window, no taskbar button,
-and it stays running to hold the software half of a display that has no hardware
-brightness control, and to put remembered levels back. A Windows gamma ramp is
-not reverted when the process exits, so the agent releases it on the way out
-rather than leaving the display scaled. The sleep restore above is the same code,
-from `klart-tray-common`.
+and it stays running because it has to hold the software half of a below-seam
+level and put remembered levels back. An overlay disappears when the process
+exits; a Windows gamma ramp would remain, so the agent deliberately gives it
+back on the way out. The sleep restore above is the same code, from
+`klart-tray-common`.
 
 ## Status
 
