@@ -113,10 +113,11 @@ what every tool in this space uses, but it is worth knowing before depending on
 it: a macOS release can take either away.
 
 Windows has the same shape with public APIs: the Monitor Configuration API for
-external monitors, WMI for the machine's own panel, and a software half — a
-gamma ramp in SDR, an overlay in HDR — for the range below the backlight. There
-is no `DisplayServices` equivalent to worry about, and the driver does the
-DDC/CI framing itself.
+external monitors, WMI for the machine's own panel, and a software half for the
+range below the backlight — a gamma ramp in SDR, with an overlay under the
+lowest ramp Windows accepts, and an overlay from the start in HDR. There is no
+`DisplayServices` equivalent to worry about, and the driver does the DDC/CI
+framing itself.
 
 ## Dimming below the backlight
 
@@ -128,18 +129,24 @@ halves meet at the same display state, so crossing the seam does not jump.
 
 The software half is a gamma ramp when Windows is definitely in SDR. It is a
 copy of the ramp that was already there, scaled down, so an ICC calibration or a
-Night Light curve is preserved rather than replaced. In HDR — and when HDR
-cannot be read at all — Windows does not promise what a gamma ramp does, so
-klart uses a click-through black window over the display instead. That overlay
-can only darken what is composited into the desktop, so an exclusive-fullscreen
-game can sit outside it, and it is not a way to make an HDR picture brighter.
+Night Light curve is preserved rather than replaced. Windows refuses a ramp
+that moves any entry more than 32768 from identity, which stops a plain scaled
+ramp at about half brightness — roughly 10% of a combined slider. Below that
+point klart leaves the ramp at the lowest curve Windows accepts and adds a
+click-through black window for the rest, so the slider keeps changing the
+picture all the way down. In HDR — and when HDR cannot be read at all — the
+overlay is the whole software half, because Windows does not promise what a
+gamma ramp does there. The overlay can only darken what is composited into the
+desktop, so an exclusive-fullscreen game can sit outside it, and it is not a
+way to make an HDR picture brighter.
 
 A Windows gamma ramp outlives the command that set it. Before the first scaled
 write, klart saves the original in `%APPDATA%\klart\gamma.conf`, keyed by
 display; a crash can be recovered with `klart set 100`, and the file is removed
 when the ramp is given back. The software floor is 20% of the picture, so even a
 process that dies below the seam cannot leave a black screen. Overlay windows
-vanish with the process that owns them.
+vanish with the process that owns them, so a display below the ramp's floor is
+left at that floor if the process exits.
 
 ## Using it
 
@@ -166,8 +173,9 @@ Commands act on the main display — the one with the menu bar, on macOS — unl
 `--display` takes an index, a key, or part of a name.
 
 A `*` on the mechanism means the change does not outlive the command. On macOS
-that is a gamma ramp, which the window server puts back; on Windows it is an HDR
-overlay window, which goes away with the process.
+that is a gamma ramp, which the window server puts back; on Windows it is an
+overlay window, used in HDR and below the lowest ramp the gamma API accepts,
+which goes away with the process.
 
 Levels are remembered in `~/Library/Application Support/klart/levels.conf` on
 macOS and `%APPDATA%\klart\levels.conf` on Windows, keyed by display rather than
@@ -220,10 +228,11 @@ icon, because Windows does not forward wheel messages to notification icons.
 
 A bar with a hardware and software half has a tick at 25% and a note saying that
 below it the picture is dimmed rather than the backlight. That lower range is
-held by a gamma ramp in SDR or by an overlay in HDR; the overlay sits below this
-panel while it is open, so opening the panel never hides the control under the
-dimming. Quitting releases the software half, leaving the backlight at its
-floor, and the next start restores the remembered level. “Reset software
+held by a gamma ramp in SDR — with an overlay for the bottom of it, where
+Windows would reject the ramp — or by an overlay alone in HDR. The overlay sits
+below this panel while it is open, so opening the panel never hides the control
+under the dimming. Quitting releases the software half, leaving the backlight at
+its floor, and the next start restores the remembered level. “Reset software
 dimming” does the same immediately without quitting, and remembers the resulting
 25% level so the next start does not put the darker level straight back.
 
@@ -248,9 +257,9 @@ the positions already left behind instead of replaying them.
 
 It is an agent in the same sense as the macOS one: no window, no taskbar button,
 and it stays running because it has to hold the software half of a below-seam
-level and put remembered levels back. An overlay disappears when the process
-exits; a Windows gamma ramp would remain, so the agent deliberately gives it
-back on the way out. The sleep restore above is the same code, from
+level and put remembered levels back. Both software mechanisms are released on
+the way out — the overlay would vanish by itself, and a Windows gamma ramp would
+otherwise remain. The sleep restore above is the same code, from
 `klart-tray-common`.
 
 ## Status

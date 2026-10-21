@@ -87,6 +87,29 @@ pub fn warn_about_software_dimming(controls: &[&Control]) {
                         );
                     }
                 }
+                Some("hardware+gamma+overlay" | "gamma+overlay") => {
+                    let seam = control.seam().unwrap_or(100);
+                    let below = control
+                        .get()
+                        .is_ok_and(|level| level.percent_rounded() < seam);
+
+                    if !control.persists() {
+                        eprintln!(
+                            "klart: part of {}'s level is a gamma ramp that outlives this \
+                             command, and the darkest part is an overlay window that disappears \
+                             with it — leaving the display at the ramp's floor. Set it back to \
+                             100%, or use the tray's Reset software dimming, to give both back.",
+                            control.name()
+                        );
+                    } else if below {
+                        eprintln!(
+                            "klart: part of {}'s level is being held by a gamma ramp that \
+                             outlives this command. Set it back to 100%, or use the tray's \
+                             Reset software dimming, to give it back.",
+                            control.name()
+                        );
+                    }
+                }
                 Some("hardware+overlay" | "overlay") => {
                     let seam = control.seam().unwrap_or(100);
                     if control

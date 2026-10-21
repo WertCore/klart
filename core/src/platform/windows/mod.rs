@@ -6,8 +6,9 @@
 //! - external monitors, through the Monitor Configuration API in `dxva2`, which
 //!   is DDC/CI with the driver doing the framing
 //! - the machine's own panel, through WMI
-//! - a gamma ramp in SDR, or a black overlay when HDR is on or unknown, for the
-//!   range below the backlight's own minimum
+//! - a gamma ramp in SDR, with a black overlay below the lowest ramp Windows
+//!   accepts, or a black overlay from the start when HDR is on or unknown, for
+//!   the range below the backlight's own minimum
 //!
 //! Because the driver speaks DDC/CI on this platform's behalf, [`crate::ddc`] is
 //! not used here at all. The protocol that macOS and Linux hand-roll is inside
@@ -23,6 +24,7 @@ mod monitors;
 mod overlay;
 mod panel;
 mod physical;
+mod software;
 
 use std::path::PathBuf;
 
@@ -41,6 +43,7 @@ use self::monitors::Monitor;
 use self::overlay::Overlay;
 use self::panel::Wmi;
 use self::physical::Physical;
+use self::software::Software;
 
 /// Every monitor attached to the machine.
 ///
@@ -110,7 +113,8 @@ fn found(index: usize, monitor: &Monitor) -> Found {
 /// The software mechanism depends on HDR. While HDR is on, or when it cannot be
 /// read, Windows does not promise what a gamma ramp does; a black overlay is
 /// defined in either mode, so that is what the dark end uses. When HDR is
-/// definitely off, the ramp is cheaper and does not cover the panel.
+/// definitely off, the ramp does the work Windows will accept and an overlay
+/// carries the bottom of the range, where Windows would reject the ramp.
 ///
 /// # Errors
 ///
@@ -158,7 +162,18 @@ pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> 
     let hdr = monitor.instance.as_deref().and_then(hdr::enabled_for);
     let software: Option<Box<dyn Backend>> = if hdr == Some(false) {
         match Gamma::open(&monitor.adapter, &key) {
-            Ok(gamma) => Some(Box::new(gamma)),
+            Ok(gamma) => match Software::open(display, gamma) {
+                Ok((software, refusal)) => {
+                    if let Some(refusal) = refusal {
+                        refusals.push(refusal);
+                    }
+                    Some(Box::new(software))
+                }
+                Err(refusal) => {
+                    refusals.push(refusal);
+                    None
+                }
+            },
             Err(refusal) => {
                 refusals.push(refusal);
                 None

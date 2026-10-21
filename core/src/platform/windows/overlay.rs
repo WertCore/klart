@@ -1,9 +1,12 @@
-//! A black, click-through window over a display in HDR.
+//! A black, click-through window over a display.
 //!
-//! The gamma ramp is not defined while Windows is in HDR. Rather than write a
-//! ramp whose effect Microsoft does not promise, this dims the desktop the way
-//! a screen dimmer does: one topmost layered window per display, painted black,
-//! with the alpha channel carrying the level.
+//! The gamma ramp is not defined while Windows is in HDR, and in SDR Windows
+//! stops accepting a ramp long before the bottom of klart's software range.
+//! Rather than write a ramp whose effect Microsoft does not promise, or one it
+//! will silently drop, this dims the desktop the way a screen dimmer does: one
+//! topmost layered window per display, painted black, with the alpha channel
+//! carrying the level. In SDR it is composed below the lowest accepted ramp,
+//! in `software.rs`; in HDR it is the whole software half.
 //!
 //! It is a fallback rather than a peer of the backlight. It can only darken
 //! what is composited into the desktop, so an exclusive-fullscreen game is
@@ -111,8 +114,8 @@ static MANAGER: OnceLock<Option<Manager>> = OnceLock::new();
 
 /// The panel the overlays should stay below, when one is open.
 ///
-/// Kept outside the manager so that a panel opened before the first HDR overlay
-/// still gets to set the order when that overlay is created.
+/// Kept outside the manager so that a panel opened before the first overlay
+/// still gets to set the order when the overlay is created.
 static ANCHOR: AtomicIsize = AtomicIsize::new(0);
 
 /// A display dimmed with a layered black window.
@@ -649,10 +652,21 @@ unsafe fn place(hwnd: HWND, anchor: isize) {
     }
 }
 
+/// The fraction of the picture left by an overlay set to a level.
+pub(crate) fn visible_for(level: Brightness) -> f32 {
+    FLOOR + (1.0 - FLOOR) * level.fraction()
+}
+
+/// The overlay level that leaves a given fraction of the picture.
+pub(crate) fn level_for_visible(visible: f32) -> Brightness {
+    Brightness::new((visible - FLOOR) / (1.0 - FLOOR))
+}
+
 /// The alpha that leaves a given fraction of the picture.
 fn alpha_for(level: Brightness) -> u8 {
-    let visible = FLOOR + (1.0 - FLOOR) * level.fraction();
-    ((1.0 - visible) * 255.0).round().clamp(0.0, 255.0) as u8
+    ((1.0 - visible_for(level)) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 /// The window procedure for the hidden manager window.
@@ -759,6 +773,18 @@ mod tests {
             let alpha = alpha_for(Brightness::from_percent(whole as f32));
             assert!(alpha >= previous, "alpha at {whole}% was {alpha}");
             previous = alpha;
+        }
+    }
+
+    #[test]
+    fn a_visible_fraction_round_trips_through_the_level() {
+        for whole in 20..=100 {
+            let level = Brightness::from_percent(whole as f32);
+            let visible = visible_for(level);
+            assert!(
+                (visible_for(level_for_visible(visible)) - visible).abs() < 1e-5,
+                "{whole}% did not survive the round trip"
+            );
         }
     }
 

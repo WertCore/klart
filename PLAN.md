@@ -1190,3 +1190,47 @@ exited; the next start restored 8% and wrote the baseline entry again. The
 overlay path was exercised against a real display, including hiding on a posted
 display change, but HDR itself was off, so the unticked box is the one that
 needs an HDR panel rather than another test.
+
+## 35. The bottom of the gamma ramp
+
+- [x] Reproduce the freeze below 10% on the SDR panel
+- [x] Measure the gamma API's actual floor instead of assuming it
+- [x] Stop the ramp at the lowest curve Windows accepts
+- [x] Carry the rest of the range with the existing click-through overlay
+- [x] Cover the whole 0-25% band in unit tests
+- [x] Run the ignored combined test through every level on the real panel
+- [x] Drag the release panel through 10%, 9%, 5%, 0%, and back
+- [x] Reset, quit, restart, and restore a below-floor level
+
+The report was that brightness stopped changing below 10%. The write was not
+being ignored by the monitor; `SetDeviceGammaRamp` was refusing the ramp. A
+probe against `LS32AG55x` showed the cliff exactly where Microsoft's heuristic
+says it is: every entry must stay within 32768 of identity. A linear scale
+reached 32440 at factor 0.495 and failed; 32768 at factor 0.5 applied. The old
+code called that failure an error, the tray kept the previous successful ramp,
+and the slider moved over a picture that no longer did.
+
+The fix is not to push the ramp harder. `gamma.rs` now works out the lowest
+factor its own baseline can take — an ICC profile or Night Light curve can move
+the floor — and clamps there. A new `software.rs` composes that ramp with the
+overlay already used for HDR. Above the floor the ramp does all the work and the
+overlay stays hidden; below it the ramp holds still and the overlay makes up the
+difference. The product of the two fractions is the old software-level meaning,
+so the ceiling and floor are unchanged. At 10% the ramp is at factor 0.52; at 9%
+it is at 0.51 with an 11/255 overlay; at 5% the overlay is 75/255; at 0% it is
+155/255. The panel is still above the overlay, and `persists` is false only while
+the overlay is contributing.
+
+Measured on the same panel through the release tray: 25% left gamma at identity
+and the overlay hidden; 10% wrote max 34078 with the overlay hidden; 9% wrote the
+floor at max 33422 and showed the overlay at alpha 11; 8%, 5%, 1%, and 0% held
+the ramp and raised alpha to 27, 75, 139, and 155. Going back to 25% restored
+identity and hid the overlay. Reset restored identity, removed the `gamma.conf`
+entry, and left `levels.conf` at 25. Quit at 9% restored identity, hid the overlay,
+and left `levels.conf` at 9; the next start put the floor and alpha 11 back.
+
+The ignored hardware test now walks 25, 20, 15, 12, 11, 10, 9, 8, 5, 1, and 0
+on whatever display pairs a backlight with a software fallback, and asserts each
+level reads back. A separate one-shot `klart set` still leaves only the ramp
+when it exits, as the warning says; the running tray is what holds the overlay
+part. HDR itself remains untested because the panel was in SDR.

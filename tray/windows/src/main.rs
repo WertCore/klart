@@ -668,7 +668,10 @@ impl App {
         if self.driver.controls().iter().any(|control| {
             control.seam().is_some()
                 || !control.persists()
-                || matches!(control.mechanism(), Some("gamma" | "overlay"))
+                || matches!(
+                    control.mechanism(),
+                    Some("gamma" | "gamma+overlay" | "overlay")
+                )
         }) {
             commands.push(CommandSpec {
                 id: CMD_RESET_SOFTWARE,

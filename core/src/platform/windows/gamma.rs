@@ -1,8 +1,16 @@
-//! Software dimming, through the display's gamma ramp.
+//! Software dimming, through the display's gamma ramp, as far as Windows allows.
 //!
 //! `SetDeviceGammaRamp` on a device context for the adapter. The same trade as
 //! everywhere else: it darkens the picture rather than the backlight, so
 //! contrast goes with it, and it is what is left when nothing better answers.
+//!
+//! Windows accepts only ramps that stay close to the identity curve — no entry
+//! may move more than 32768 from where it started. Scaling an ordinary ramp
+//! towards black reaches that limit at about half brightness, so the bottom of
+//! the software range cannot be a ramp at all: a write below the limit is
+//! rejected and the previous curve stays on screen. This module stops at the
+//! lowest ramp Windows will take; [`super::software`] carries the rest with an
+//! overlay. Without that split the slider moves and the picture stops.
 //!
 //! Unlike macOS, Windows does not put the ramp back when the process that set it
 //! exits — it stays until something else changes it or the session ends. That is
@@ -39,8 +47,25 @@ pub(crate) const NAME: &str = "gamma";
 ///
 /// The same floor, and for the same reason, as every other platform: a ramp of
 /// zero is a black screen, and a black screen cannot be undone from a menu
-/// nobody can see.
+/// nobody can see. On Windows the API's own heuristic usually stops the ramp
+/// well above this; [`lowest_factor`] is the practical floor.
 const FLOOR: f32 = 0.2;
+
+/// How far a ramp entry may move from the identity curve.
+///
+/// Windows documents the heuristic without giving its exact form. The boundary
+/// was measured on the display this was written against: a ramp whose maximum
+/// was 32768 applied, and one at 32440 did not. Keeping every entry within this
+/// distance of identity is the restriction described by Microsoft's gamma
+/// documentation.
+const HEURISTIC: u16 = 32_768;
+
+/// How far above the measured limit the ramp is kept.
+///
+/// The limit is a cliff, not a slope: a write just below it is dropped without
+/// an error. The margin covers a calibration curve that is not exactly the
+/// identity table and the rounding from `f32` to `u16`.
+const MARGIN: f32 = 0.01;
 
 /// How many entries a Windows gamma ramp has, per channel.
 const ENTRIES: usize = 256;
@@ -63,7 +88,7 @@ const FACTOR_TOLERANCE: f32 = 0.02;
 const STATE_FILE: &str = "gamma.conf";
 
 /// One display's original ramp, before klart scaled it.
-type Ramp = [u16; TABLE];
+pub(crate) type Ramp = [u16; TABLE];
 
 /// Serialises reads, writes and state-file updates across every gamma instance.
 ///
@@ -128,6 +153,14 @@ impl Gamma {
         *opened.last_written.borrow_mut() = last_written;
         opened.last_level.set(level);
         Ok(opened)
+    }
+
+    /// The dimmest level this ramp can reach without Windows rejecting it.
+    ///
+    /// The caller that also has an overlay uses this as the point where the
+    /// ramp stops and the overlay takes over.
+    pub(crate) fn lowest(&self) -> Brightness {
+        Brightness::new(level_from_factor(lowest_factor(&self.baseline.borrow())))
     }
 
     /// Runs something against a device context for this adapter.
@@ -225,7 +258,11 @@ impl Backend for Gamma {
             *self.baseline.borrow_mut() = baseline;
         }
 
-        let factor = to_factor(level);
+        // Stay above the point where Windows starts dropping the ramp. The
+        // caller composes this with an overlay, so a level below the floor is
+        // still reachable there; writing it here would only leave the old ramp
+        // on screen and report success.
+        let factor = to_factor(level).max(lowest_factor(&baseline));
         let wanted = scale(&baseline, factor);
 
         // Save before the first dimming write, not after. A crash between the
@@ -256,7 +293,7 @@ impl Backend for Gamma {
         }
 
         *self.last_written.borrow_mut() = Some(wanted);
-        self.last_level.set(level.fraction());
+        self.last_level.set(level_from_factor(factor));
 
         if factor >= 1.0 {
             remove_saved(&self.key)?;
@@ -331,17 +368,66 @@ fn write(context: HDC, ramp: &Ramp) -> Result<()> {
 }
 
 /// The ramp factor that shows a given level.
-fn to_factor(level: Brightness) -> f32 {
+pub(crate) fn to_factor(level: Brightness) -> f32 {
     FLOOR + (1.0 - FLOOR) * level.fraction()
 }
 
 /// The level a given factor is showing.
-fn level_from_factor(factor: f32) -> f32 {
+pub(crate) fn level_from_factor(factor: f32) -> f32 {
     ((factor - FLOOR) / (1.0 - FLOOR)).clamp(0.0, 1.0)
 }
 
+/// The lowest factor whose ramp Windows will still accept.
+///
+/// A calibrated baseline can be dimmer than identity at some entries, which
+/// leaves less room before that entry would cross the limit. The floor is
+/// therefore worked out from the curve in front of us rather than assumed to be
+/// exactly half.
+pub(crate) fn lowest_factor(baseline: &Ramp) -> f32 {
+    let mut required = 0.0_f32;
+
+    for index in 0..ENTRIES {
+        let identity = identity_entry(index);
+        let lowest = identity.saturating_sub(HEURISTIC);
+        if lowest == 0 {
+            continue;
+        }
+
+        for channel in 0..3 {
+            let base = baseline[channel * ENTRIES + index];
+            if base == 0 {
+                // This curve is already outside what Windows accepts; there is
+                // no scale factor that can bring it back. Refuse to dim rather
+                // than write a ramp that will be dropped.
+                required = 1.0;
+                continue;
+            }
+            required = required.max(f32::from(lowest) / f32::from(base));
+        }
+    }
+
+    (required + MARGIN).min(1.0)
+}
+
+/// The identity value at one entry of a channel.
+fn identity_entry(index: usize) -> u16 {
+    // 65535 / 255 = 257 exactly, so this ends at 65535 and needs no rounding.
+    u16::try_from(index * 257).unwrap_or(u16::MAX)
+}
+
+/// Whether a ramp stays inside the heuristic Windows documents.
+///
+/// Kept for tests: the formula in [`lowest_factor`] has to agree with what the
+/// API actually accepts, and this is the assertion that says so.
+#[cfg(test)]
+pub(crate) fn within_heuristic(ramp: &Ramp) -> bool {
+    ramp.iter()
+        .enumerate()
+        .all(|(index, entry)| entry.abs_diff(identity_entry(index % ENTRIES)) <= HEURISTIC)
+}
+
 /// Scales a baseline table towards black.
-fn scale(baseline: &Ramp, factor: f32) -> Ramp {
+pub(crate) fn scale(baseline: &Ramp, factor: f32) -> Ramp {
     let mut scaled = [0_u16; TABLE];
     for (entry, base) in scaled.iter_mut().zip(baseline) {
         *entry = (f32::from(*base) * factor)
@@ -520,19 +606,26 @@ fn decode(text: &str) -> Option<Ramp> {
     Some(ramp)
 }
 
+/// The identity table every channel starts from, for tests in this module and
+/// the composition that sits above it.
+#[cfg(test)]
+pub(crate) fn identity_ramp() -> Ramp {
+    let mut ramp = [0_u16; TABLE];
+    for entry in 0..ENTRIES {
+        let value = identity_entry(entry);
+        ramp[entry] = value;
+        ramp[ENTRIES + entry] = value;
+        ramp[ENTRIES * 2 + entry] = value;
+    }
+    ramp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn identity() -> Ramp {
-        let mut ramp = [0_u16; TABLE];
-        for entry in 0..ENTRIES {
-            let value = (entry as f32 / (ENTRIES - 1) as f32 * f32::from(u16::MAX)).round() as u16;
-            ramp[entry] = value;
-            ramp[ENTRIES + entry] = value;
-            ramp[ENTRIES * 2 + entry] = value;
-        }
-        ramp
+        identity_ramp()
     }
 
     #[test]
@@ -566,6 +659,39 @@ mod tests {
 
         assert!(resembles(&scaled, &baseline));
         assert!((factor_of(&scaled, &baseline) - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn the_lowest_ramp_is_one_windows_accepts() {
+        let baseline = identity();
+        let floor = lowest_factor(&baseline);
+
+        assert!(
+            (0.5..0.55).contains(&floor),
+            "the measured Windows cliff is at half brightness, not {floor}"
+        );
+        assert!(
+            within_heuristic(&scale(&baseline, floor)),
+            "the ramp written at the floor must stay inside the API heuristic"
+        );
+        assert!(
+            !within_heuristic(&scale(&baseline, floor - 0.02)),
+            "the test has to fail on the curve that used to be dropped"
+        );
+    }
+
+    #[test]
+    fn a_darker_baseline_needs_a_higher_floor() {
+        // Night Light and ICC profiles do not leave an identity curve. Scaling
+        // an already-dimmed entry leaves less room before it crosses the limit,
+        // so the floor has to move up rather than being hard-coded to half.
+        let baseline = identity();
+        let darker = scale(&baseline, 0.85);
+
+        assert!(
+            lowest_factor(&darker) > lowest_factor(&baseline),
+            "a darker starting curve cannot be scaled as far"
+        );
     }
 
     #[test]

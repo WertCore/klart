@@ -253,7 +253,10 @@ impl Driver {
             // level worth putting back after a clean quit released it. A
             // backlight-only control has nothing to restore: its own buttons are
             // the authority.
-            let software_only = matches!(control.mechanism(), Some("gamma" | "overlay"));
+            let software_only = matches!(
+                control.mechanism(),
+                Some("gamma" | "gamma+overlay" | "overlay")
+            );
             let mut fresh = false;
 
             if control.persists() && !software_only {

@@ -126,13 +126,14 @@ impl Combined {
 impl Backend for Combined {
     fn name(&self) -> &'static str {
         // Both halves, because which one is doing the work depends on where the
-        // level is and a reader deserves to know both are involved. The software
-        // half is a gamma ramp in SDR and an overlay in HDR, and those are not
-        // the same promise about persistence.
-        if self.software.name() == "overlay" {
-            "hardware+overlay"
-        } else {
-            "hardware+gamma"
+        // level is and a reader deserves to know both are involved. In SDR the
+        // software half is a gamma ramp with an overlay under its floor; in HDR
+        // it is an overlay alone. Those are not the same promise about
+        // persistence.
+        match self.software.name() {
+            "overlay" => "hardware+overlay",
+            "gamma+overlay" => "hardware+gamma+overlay",
+            _ => "hardware+gamma",
         }
     }
 
@@ -460,12 +461,12 @@ mod hardware {
     /// both are what the warning on `klart set` is about.
     #[test]
     #[ignore = "moves a real backlight"]
-    fn a_level_below_the_seam_reaches_past_the_backlight() {
+    fn every_level_below_the_seam_reaches_past_the_backlight() {
         let attached = controls().expect("displays should open");
         let Some(control) = attached.iter().find(|found| {
             matches!(
                 found.mechanism(),
-                Some("hardware+gamma" | "hardware+overlay")
+                Some("hardware+gamma" | "hardware+gamma+overlay" | "hardware+overlay")
             )
         }) else {
             panic!("no display on this machine pairs a backlight with a software fallback");
@@ -477,21 +478,25 @@ mod hardware {
         control.set(above).expect("a level should be settable");
         let read_above = control.get().expect("a level should be readable");
 
-        let below = Brightness::from_percent(10.0);
-        control.set(below).expect("a level should be settable");
-        let read_below = control.get().expect("a level should be readable");
+        // The whole software range, not only the top of it. Levels below the
+        // gamma ramp's Windows-imposed floor are the ones this exists for: they
+        // used to fail their write and leave the previous ramp on screen.
+        for whole in [25, 20, 15, 12, 11, 10, 9, 8, 5, 1, 0] {
+            let asked = Brightness::from_percent(f32::from(whole));
+            control.set(asked).expect("a level should be settable");
+            let read = control.get().expect("a level should be readable");
+
+            assert_eq!(
+                read.percent_rounded(),
+                whole,
+                "a level a backlight alone cannot express should still read back"
+            );
+            assert!(
+                read < read_above,
+                "{whole}% should be dimmer than the level above the seam"
+            );
+        }
 
         control.set(was).expect("a level should be settable");
-
-        assert_eq!(read_above.percent_rounded(), 60);
-        assert_eq!(
-            read_below.percent_rounded(),
-            10,
-            "a level a backlight alone cannot express should still read back"
-        );
-        assert!(
-            read_below < read_above,
-            "and it should be the dimmer of the two"
-        );
     }
 }
