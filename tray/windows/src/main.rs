@@ -1,10 +1,11 @@
 //! `klart` in the notification area.
 //!
 //! An agent rather than an application: no window, no taskbar button, no
-//! console. It holds a `Shell_NotifyIcon` icon and, because the gamma ramp a
-//! display is dimmed with is reverted the moment the process that set it exits,
-//! it stays running so that a display with no hardware brightness control can
-//! stay dim.
+//! console. It holds a `Shell_NotifyIcon` icon and stays running to keep the
+//! software half of a dimmed display under control: Windows leaves a gamma ramp
+//! behind rather than reverting it, so the agent releases that ramp on the way
+//! out. It also restores remembered levels and keeps a display with no hardware
+//! brightness control dim.
 //!
 //! The icon opens a hand-drawn popup rather than a menu, for the reason
 //! [`panel`] gives: a Windows menu cannot hold a slider that is dragged.

@@ -206,8 +206,11 @@ The thread keeps only the newest value for each display, so a fast drag skips
 the positions already left behind instead of replaying them.
 
 It is an agent in the same sense as the macOS one: no window, no taskbar button,
-and it stays running because a gamma ramp is reverted when the process that set
-it exits. The sleep restore above is the same code, from `klart-tray-common`.
+and it stays running to hold the software half of a display that has no hardware
+brightness control, and to put remembered levels back. A Windows gamma ramp is
+not reverted when the process exits, so the agent releases it on the way out
+rather than leaving the display scaled. The sleep restore above is the same code,
+from `klart-tray-common`.
 
 ## Status
 
