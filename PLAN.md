@@ -258,7 +258,7 @@ Input Monitoring) because a tap can *swallow* the event — return null and macO
 does not also dim the built-in panel — which passive HID observation cannot. That
 choice rests on one machine-dependent unknown, which is what the spike is for.
 
-### Spike, then the feature: `tray/src/keys.rs`
+### Spike, then the feature: `tray/macos/src/keys.rs`
 
 - [x] Confirm a session `CGEventTap` is refused without Accessibility
 - [x] Confirm a *granted* tap receives the brightness keys, and as what
@@ -272,7 +272,7 @@ release, which is the media-key case — "Use F1/F2 as standard function keys" o
 its default. So the `CGEventTap`/Accessibility route holds on this hardware and
 the HID fallback is not needed; swallowing comes with visibility.
 
-The feature is now `tray/src/keys.rs`. On a press it moves the display under the
+The feature is now `tray/macos/src/keys.rs`. On a press it moves the display under the
 pointer — [`Driver::display_at`] resolves it from `CGEventGetLocation` against the
 displays' bounds, both in the same global top-left coordinates — through the
 existing [`Driver`], so a key gets DDC-then-gamma and the sub-floor range for
@@ -294,7 +294,7 @@ Still to do, each its own step rather than this one:
 - [x] The `RegisterEventHotKey` chord fallback, for anyone who declines
       Accessibility — so the feature is reachable without the grant.
 
-Built in `tray/src/chord.rs`. `⌃⌥↑` / `⌃⌥↓` through Carbon's
+Built in `tray/macos/src/chord.rs`. `⌃⌥↑` / `⌃⌥↓` through Carbon's
 `RegisterEventHotKey`, which asks for no permission and works the moment it is
 installed — the price being that the chord is invented rather than the keys
 already on the keyboard. Registered whether or not the tap is (no harm in both,
@@ -308,7 +308,7 @@ because the API has no modern replacement that avoids the permission.
       swallows that with the key, so right now the only feedback is the screen
       changing. Enough to be usable, thin for a control people expect a HUD from.
 
-Built in `tray/src/hud.rs`, shaped to pass for the system OSD so it reads as
+Built in `tray/macos/src/hud.rs`, shaped to pass for the system OSD so it reads as
 inbuilt: a rounded *square* frosted `NSVisualEffectView` window, the system
 `sun.max.fill` SF Symbol filling the upper middle (the same glyph macOS uses),
 a continuous bar beneath it — a dim full-width track with a bright white fill,
@@ -1027,7 +1027,7 @@ report — is covered by a test instead.
 - [ ] The wheel over a bar steps it, and the panel closes on Escape or a click
       outside
 - [ ] "Start at login" survives a sign-out, and "Quit klart" removes the icon
-- [ ] Light and dark mode both draw legibly, including after the mode changes
+- [x] Light and dark mode both draw legibly, including after the mode changes
       while the agent is running
 - [ ] A monitor plugged in or removed is noticed, and the panel is placed on the
       right monitor at 100%, 150% and 200%
@@ -1045,7 +1045,10 @@ from another program.
 The icon is drawn rather than shipped as an `.ico`. macOS uses `sun.max`, which
 is a template image, and Windows has no template images for notification icons —
 so there is no single `.ico` that is legible on both a light and a dark taskbar.
-A warm gold sun with an alpha channel is, and drawing it from one description
+A monochrome sun with an alpha channel is, provided it is drawn in the taskbar's
+own ink: white on a dark taskbar, black on a light one. The agent reads
+`SystemUsesLightTheme` — not `AppsUseLightTheme`, which the panel follows — and
+replaces the icon when Windows mode changes. Drawing it from one description
 means it is sharp at 16, 20, 24 and 32 pixels rather than scaled from one size.
 
 Two things were not obvious and are worth recording. `Shell_NotifyIcon` does not
@@ -1113,3 +1116,30 @@ message took 3.2 ms, the median 0.6 ms, and the display finished at 95%, which i
 where the pointer left it. What is still unticked is what a person sees: that the
 promoted icon is in the row beside the sound icon, and that a hand-driven drag
 feels like the numbers.
+
+## 33. The icon in the taskbar's ink, and tray code under one roof
+
+- [x] Draw the sun white on a dark taskbar and black on a light one
+- [x] Replace it when Windows mode changes, with the tick as a backstop
+- [x] Move `tray`, `tray-common` and `tray-windows` under `tray/macos`,
+      `tray/common` and `tray/windows`
+- [x] The sun matches the sound and network icons in both modes
+
+The first look at the icon found a gold sun next to white system icons. The
+colour had been chosen so that one bitmap would be legible on both taskbars,
+because Windows has no template images and will not recolour a notification icon
+itself. That is the wrong trade: an icon that is merely legible beside the sound
+and network icons still looks like a different program's. The glyph is now drawn
+in the ink those icons use — white on a dark taskbar, black on a light one — and
+redrawn when `SystemUsesLightTheme` changes. The taskbar setting is not
+`AppsUseLightTheme`, which the panel follows; Windows can run dark apps on a
+light taskbar, and the notification area follows the taskbar. A registry read in
+the tick catches the change if the broadcast arrives while the agent is asleep.
+Checked on this machine: white beside the white sound and network icons, black
+beside the black ones, and it changed while the agent was running.
+
+The crates moved without changing a package or binary name: `tray/macos` is
+still `klart-tray`, `tray/windows` is still `klart-tray-windows` with a
+`klart-tray.exe` binary, and `tray/common` is still `klart-tray-common`. The
+packaging script now names the two macOS binaries rather than building the
+workspace, which would have stopped in the Windows crate's `compile_error!`.

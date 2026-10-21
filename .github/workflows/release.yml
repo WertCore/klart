@@ -271,7 +271,9 @@ jobs:
           The panel is drawn by the agent rather than assembled from menu items:
           a trackbar is a control with its own idea of a theme and does not look
           like the bar the macOS agent draws. Windows 11 rounds its corners;
-          Windows 10 draws it square, the way its own flyouts are.
+          Windows 10 draws it square, the way its own flyouts are. The sun is
+          drawn in the same white or black as the system's own tray icons, and
+          changes with Windows mode.
 
           Windows puts a new notification icon in the overflow area by design.
           On Windows 11 22H2 and later klart asks to be shown beside the clock on

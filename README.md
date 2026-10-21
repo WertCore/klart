@@ -86,9 +86,11 @@ There are two tray agents, and they are separate programs rather than one with
 `Shell_NotifyIcon` with a hand-drawn panel instead of a menu, because a Windows
 menu cannot hold a slider that is dragged. What they do share is
 `klart-tray-common` — the write rate limiting, the remembered levels and the
-restore after a wake — so those cannot drift apart between the platforms. A tray
-for Linux is still StatusNotifierItem over D-Bus or the legacy XEmbed protocol,
-and is a third crate rather than a variant of either.
+restore after a wake — so those cannot drift apart between the platforms. The
+three crates live under `tray/`: `common`, `macos` and `windows`, with the
+package and binary names unchanged. A tray for Linux is still StatusNotifierItem
+over D-Bus or the legacy XEmbed protocol, and is a third crate rather than a
+variant of either.
 
 `DisplayKey` is portable by contract — its derivation is seven numbered rules,
 each with a test, over EDID fields every operating system can read. A
@@ -175,11 +177,12 @@ agrees. A display that never agrees is reported once and left alone.
 
 ## In the notification area
 
-`klart-tray.exe` is the Windows agent. It puts a gold sun in the notification
-area — beside the sound icon on Windows 11 — and left or right clicking it opens
-a panel: a bar per display, one for all of them when there is more than one, then
-the rows for keeping their relative levels, starting at login, looking for
-displays again, and quitting. A wheel over a bar moves it five percent — the
+`klart-tray.exe` is the Windows agent. It puts a sun in the notification area —
+beside the sound icon on Windows 11 — in the same white or black as the system's
+own icons, and redraws it when Windows mode changes. Left or right clicking it
+opens a panel: a bar per display, one for all of them when there is more than
+one, then the rows for keeping their relative levels, starting at login, looking
+for displays again, and quitting. A wheel over a bar moves it five percent — the
 wheel is handled by the panel rather than by the icon, because Windows does not
 forward wheel messages to notification icons.
 
@@ -283,12 +286,19 @@ Both binaries are unsigned, so SmartScreen warns on first run.
 ## Building
 
 ```sh
-cargo build --release      # the two binaries
-scripts/bundle.sh          # dist/Klart.app
+# macOS
+cargo build --release -p klart-cli -p klart-tray
+scripts/bundle.sh
+
+# Windows
+cargo build --release -p klart-cli -p klart-tray-windows
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` will fetch the
-right one on first build.
+right one on first build. Name the agent for the platform: `klart-tray` is
+AppKit and `klart-tray-windows` is Win32. A bare `cargo build --release` tries
+every workspace member and stops in the agent for the other platform, which says
+so with a `compile_error!`.
 
 ## Licence
 

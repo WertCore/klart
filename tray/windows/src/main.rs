@@ -52,9 +52,9 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
-    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect,
-    Shell_NotifyIconW,
+    NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+    NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER,
+    Shell_NotifyIconGetRect, Shell_NotifyIconW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DBT_DEVNODES_CHANGED, DefWindowProcW, DestroyIcon,
@@ -161,6 +161,8 @@ struct App {
     /// Whether [`App::icon`] came from [`icon::sun`] and must be destroyed, or
     /// is a shared system icon that must not be.
     icon_owned: bool,
+    /// Whether the current glyph is the dark one for a light taskbar.
+    icon_light: bool,
     /// Whether the icon is currently in the notification area. False after
     /// Explorer has restarted and before it has been put back.
     icon_added: bool,
@@ -224,8 +226,9 @@ impl App {
 
         // SAFETY: called on the thread that will run the message loop, which is
         // where GDI objects and `CreateIconIndirect` belong.
+        let icon_light = theme::taskbar_uses_light_theme();
         let (icon, icon_owned) = unsafe {
-            let drawn = icon::sun();
+            let drawn = icon::sun(icon_light);
             if drawn.is_null() {
                 (LoadIconW(std::ptr::null_mut(), IDI_APPLICATION), false)
             } else {
@@ -239,6 +242,7 @@ impl App {
             writer,
             icon,
             icon_owned,
+            icon_light,
             icon_added: false,
             nid: NOTIFYICONDATAW::default(),
             panel: None,
@@ -363,6 +367,54 @@ impl App {
         self.promote();
     }
 
+    /// Redraws the sun when the taskbar changes between light and dark mode.
+    ///
+    /// A notification icon is not a template image: the shell draws the handle
+    /// it was given, in that handle's colours. The system's own icons follow
+    /// `SystemUsesLightTheme`, so this glyph does too. The tick also calls this,
+    /// which catches a broadcast that arrived while the machine was asleep.
+    fn sync_icon_theme(&mut self) {
+        let light = theme::taskbar_uses_light_theme();
+        if light == self.icon_light {
+            return;
+        }
+
+        let drawn = icon::sun(light);
+        if drawn.is_null() {
+            // The old ink is still legible, if not right; the next tick asks
+            // again.
+            return;
+        }
+
+        let previous = std::mem::replace(&mut self.icon, drawn);
+        let previous_owned = self.icon_owned;
+        self.icon_owned = true;
+        self.icon_light = light;
+
+        if self.icon_added {
+            let mut data = self.nid;
+            data.uFlags = NIF_ICON;
+            data.hIcon = drawn;
+            // SAFETY: the structure is live and names this window's icon.
+            if unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) } == 0 {
+                // Explorer may have gone away. Forget the registration; the
+                // tick adds the icon again with this handle.
+                self.icon_added = false;
+            } else {
+                self.nid = data;
+            }
+        }
+
+        // SAFETY: the previous handle was owned exactly when `previous_owned`
+        // says so. Either the modify above replaced it or there is no icon left
+        // to show it.
+        unsafe {
+            if previous_owned && !previous.is_null() {
+                DestroyIcon(previous);
+            }
+        }
+    }
+
     /// Gives the Windows 11 icon a chance to sit beside the clock.
     ///
     /// Explorer creates the per-icon registry entry a moment after the icon is
@@ -439,6 +491,8 @@ impl App {
         self.driver.flush();
         self.driver.persist();
         self.driver.drive_restore();
+
+        self.sync_icon_theme();
 
         if !self.icon_added {
             self.add_icon();
@@ -757,7 +811,9 @@ impl App {
                 if immersive_colour_changed(lparam) {
                     // The palette is read when the panel is built, so closing
                     // an open one is enough: the next opens in the new mode.
+                    // The icon is already drawn, so it has to be made again.
                     self.panel = None;
+                    self.sync_icon_theme();
                 }
                 0
             }

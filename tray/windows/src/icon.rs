@@ -3,13 +3,14 @@
 //! macOS uses the `sun.max` system symbol, which is a template image and
 //! therefore has no colour of its own. Windows has no template images for tray
 //! icons, so the glyph is drawn here into an alpha bitmap: the same sun, at
-//! whatever size the notification area currently asks for. A warm colour rather
-//! than black or white because the taskbar can be either, and a template-like
-//! monochrome icon would disappear into one of them.
+//! whatever size the notification area currently asks for, and in the ink the
+//! system's own tray icons use — white on a dark taskbar, black on a light one.
+//! The shell does not recolour a third-party icon, so the agent redraws and
+//! replaces this one when Windows mode changes.
 //!
 //! It is drawn rather than shipped as an `.ico` so that it is sharp at 16, 20,
-//! 24 and 32 pixels — the sizes Windows picks between as the DPI changes — from
-//! one description of the shape.
+//! 24 and 32 pixels — the sizes Windows picks between as the DPI changes — and
+//! so both inks come from one description of the shape.
 
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -38,13 +39,16 @@ const RAY_HALF: f32 = 0.045;
 
 /// Makes an icon sized for the notification area.
 ///
+/// `on_light_taskbar` selects the ink: the system's own icons are black on a
+/// light taskbar and white on a dark one, and this follows them.
+///
 /// The caller owns it and must hand it to `DestroyIcon`.
 #[must_use]
-pub fn sun() -> HICON {
+pub fn sun(on_light_taskbar: bool) -> HICON {
     // SAFETY: no arguments, and the call has no side effects.
     let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
     // SAFETY: `size` is positive and GDI object creation is on the main thread.
-    unsafe { render(size) }
+    unsafe { render(size, on_light_taskbar) }
 }
 
 /// Draws the sun at `size` pixels square.
@@ -53,7 +57,7 @@ pub fn sun() -> HICON {
 ///
 /// GDI object creation and `CreateIconIndirect` must be called from a thread
 /// that is allowed to own them, which in this program is the main thread.
-unsafe fn render(size: i32) -> HICON {
+unsafe fn render(size: i32, on_light_taskbar: bool) -> HICON {
     let side = usize::try_from(size).unwrap_or(16);
     let mut pixels = vec![0u32; side * side];
 
@@ -67,9 +71,8 @@ unsafe fn render(size: i32) -> HICON {
             // `0xAARRGGBB` in a little-endian word is the BGRA byte order a
             // 32-bit DIB holds.
             let alpha = (coverage * 255.0).round().clamp(0.0, 255.0) as u32;
-            let (red, green, blue) = (255u32, 190u32, 46u32);
             let index = usize::try_from(y * size + x).unwrap_or(0);
-            pixels[index] = (alpha << 24) | (red << 16) | (green << 8) | blue;
+            pixels[index] = (alpha << 24) | ink(on_light_taskbar);
         }
     }
 
@@ -138,6 +141,11 @@ unsafe fn render(size: i32) -> HICON {
     }
 
     icon
+}
+
+/// The ink the system's own tray icons use on each taskbar.
+fn ink(on_light_taskbar: bool) -> u32 {
+    if on_light_taskbar { 0x000000 } else { 0xFFFFFF }
 }
 
 /// How much of one pixel the sun covers, from 0 to 1.
@@ -225,5 +233,11 @@ mod tests {
             }
         }
         assert!(covered > 20, "a 16px sun has to be visible: {covered}");
+    }
+
+    #[test]
+    fn the_ink_follows_the_taskbar() {
+        assert_eq!(ink(true), 0x000000, "a light taskbar needs a dark glyph");
+        assert_eq!(ink(false), 0xFFFFFF, "a dark taskbar needs a light glyph");
     }
 }

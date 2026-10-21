@@ -178,6 +178,19 @@ pub fn apps_use_light_theme() -> bool {
     read_dword("AppsUseLightTheme").unwrap_or(1) != 0
 }
 
+/// Whether the taskbar and its notification icons are light.
+///
+/// This is deliberately not [`apps_use_light_theme`]: Windows lets the taskbar
+/// and the apps disagree, and the system's own tray icons follow the taskbar.
+/// The panel follows the app setting; the sun follows this one.
+#[must_use]
+pub fn taskbar_uses_light_theme() -> bool {
+    read_dword("SystemUsesLightTheme")
+        .or_else(|| read_dword("AppsUseLightTheme"))
+        .unwrap_or(1)
+        != 0
+}
+
 fn read_dword(value: &str) -> Option<u32> {
     let path = wide(PERSONALIZE);
     let name = wide(value);

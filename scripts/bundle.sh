@@ -29,7 +29,9 @@ app="dist/Klart.app"
 contents="$app/Contents"
 
 echo "building klart $version for $target"
-cargo build --release --workspace --target "$target"
+# Named rather than `--workspace`: `klart-tray-windows` is Win32 and stops at
+# its own `compile_error!` off Windows.
+cargo build --release -p klart-cli -p klart-tray --target "$target"
 
 rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Resources"
