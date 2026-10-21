@@ -1,15 +1,37 @@
-//! Software dimming, through the display's gamma ramp.
+//! Software dimming, through the display's gamma ramp, as far as Windows allows.
 //!
 //! `SetDeviceGammaRamp` on a device context for the adapter. The same trade as
 //! everywhere else: it darkens the picture rather than the backlight, so
 //! contrast goes with it, and it is what is left when nothing better answers.
 //!
+//! Windows accepts only ramps that stay close to the identity curve — no entry
+//! may move more than 32768 from where it started. Scaling an ordinary ramp
+//! towards black reaches that limit at about half brightness, so the bottom of
+//! the software range cannot be a ramp at all: a write below the limit is
+//! rejected and the previous curve stays on screen. This module stops at the
+//! lowest ramp Windows will take; [`super::software`] carries the rest with an
+//! overlay. Without that split the slider moves and the picture stops.
+//!
 //! Unlike macOS, Windows does not put the ramp back when the process that set it
 //! exits — it stays until something else changes it or the session ends. That is
-//! the better behaviour for a command line and the reason this platform's
-//! [`Backend::persists`] is true where macOS's is false.
+//! useful for a command line, and dangerous for a resident agent: a crash must
+//! not leave a display dark with nobody left to undo it. So the ramp this writes
+//! is a scaled copy of whatever was there before, the original is kept, and the
+//! agent releases it on the way out.
+//!
+//! The original cannot be read back from the display once it has been scaled
+//! without knowing what it was. It is therefore written to `gamma.conf` next to
+//! the remembered levels, keyed by display, before the first dimming write. A
+//! process that finds that file after a crash can tell its own scaled ramp from
+//! a fresh calibration change and put the original back.
 
-use windows_sys::Win32::Graphics::Gdi::{CreateDCW, DeleteDC};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+use windows_sys::Win32::Graphics::Gdi::{CreateDCW, DeleteDC, HDC};
 use windows_sys::Win32::UI::ColorSystem::{GetDeviceGammaRamp, SetDeviceGammaRamp};
 
 use crate::Brightness;
@@ -25,30 +47,120 @@ pub(crate) const NAME: &str = "gamma";
 ///
 /// The same floor, and for the same reason, as every other platform: a ramp of
 /// zero is a black screen, and a black screen cannot be undone from a menu
-/// nobody can see.
+/// nobody can see. On Windows the API's own heuristic usually stops the ramp
+/// well above this; [`lowest_factor`] is the practical floor.
 const FLOOR: f32 = 0.2;
+
+/// How far a ramp entry may move from the identity curve.
+///
+/// Windows documents the heuristic without giving its exact form. The boundary
+/// was measured on the display this was written against: a ramp whose maximum
+/// was 32768 applied, and one at 32440 did not. Keeping every entry within this
+/// distance of identity is the restriction described by Microsoft's gamma
+/// documentation.
+const HEURISTIC: u16 = 32_768;
+
+/// How far above the measured limit the ramp is kept.
+///
+/// The limit is a cliff, not a slope: a write just below it is dropped without
+/// an error. The margin covers a calibration curve that is not exactly the
+/// identity table and the rounding from `f32` to `u16`.
+const MARGIN: f32 = 0.01;
 
 /// How many entries a Windows gamma ramp has, per channel.
 const ENTRIES: usize = 256;
 
+/// The whole table, three interleaved channels.
+const TABLE: usize = ENTRIES * 3;
+
+/// How much a read-back may differ from what was written and still count.
+///
+/// A gamma ramp is occasionally quantised to eight bits by a driver, which is a
+/// difference of 257 in a `u16`. This is a little wider than that: enough to
+/// absorb the quantisation, not enough to mistake a different curve for the one
+/// that was written.
+const TOLERANCE: u16 = 1024;
+
+/// How far the factor read back may sit from the one asked for.
+const FACTOR_TOLERANCE: f32 = 0.02;
+
+/// The file holding ramp baselines that a dimmed display needs to be undone.
+const STATE_FILE: &str = "gamma.conf";
+
+/// One display's original ramp, before klart scaled it.
+pub(crate) type Ramp = [u16; TABLE];
+
+/// Serialises reads, writes and state-file updates across every gamma instance.
+///
+/// The tray opens two sets of controls — one for the message loop and one for
+/// the writer thread — so two `Gamma`s can address the same adapter. The display
+/// call itself is short; holding one lock around it is simpler than teaching
+/// every caller which of its controls are the same display.
+static GAMMA_LOCK: Mutex<()> = Mutex::new(());
+
 /// A display's brightness, faked with its gamma ramp.
 pub(crate) struct Gamma {
     adapter: String,
+    key: String,
+    /// The ramp that was there before klart first dimmed this display.
+    baseline: RefCell<Ramp>,
+    /// The last table this instance wrote, for telling its own ramp from a
+    /// change made by something else.
+    last_written: RefCell<Option<Ramp>>,
+    /// The level the last write was for, so a read-back need not be inverted
+    /// through the factor if nothing has changed since.
+    last_level: Cell<f32>,
 }
 
 impl Gamma {
-    /// Binds to an adapter.
+    /// Binds to an adapter for one display.
     ///
     /// # Errors
     ///
-    /// When a device context cannot be made for it, which means the adapter has
-    /// gone away.
-    pub(crate) fn open(adapter: &str) -> Result<Self> {
+    /// When a device context cannot be made for it, or its ramp cannot be read,
+    /// which means the adapter has gone away.
+    pub(crate) fn open(adapter: &str, key: &str) -> Result<Self> {
         let opened = Self {
             adapter: adapter.to_owned(),
+            key: key.to_owned(),
+            baseline: RefCell::new([0; TABLE]),
+            last_written: RefCell::new(None),
+            last_level: Cell::new(1.0),
         };
-        opened.with_context(|_| Ok(()))?;
+
+        let current = opened.with_context(read)?;
+        let _guard = lock();
+
+        // A saved baseline is only ours if the ramp in front of us is that
+        // baseline or a scaled copy of it. If it is neither, something else
+        // changed the calibration while nothing was holding the ramp; that is
+        // the new baseline, and overwriting it on the next quit would clobber
+        // exactly the change this exists to preserve.
+        let saved = load_state().remove(&opened.key);
+        let (baseline, level, last_written) = match saved {
+            Some(saved) if resembles(&current, &saved) => {
+                let factor = factor_of(&current, &saved);
+                (saved, level_from_factor(factor), Some(current))
+            }
+            Some(_) => {
+                let _ = remove_saved(&opened.key);
+                (current, 1.0, None)
+            }
+            None => (current, 1.0, None),
+        };
+
+        *opened.baseline.borrow_mut() = baseline;
+        *opened.last_written.borrow_mut() = last_written;
+        opened.last_level.set(level);
         Ok(opened)
+    }
+
+    /// The dimmest level this ramp can reach without Windows rejecting it.
+    ///
+    /// The caller that also has an overlay uses this as the point where the
+    /// ramp stops and the overlay takes over.
+    pub(crate) fn lowest(&self) -> Brightness {
+        Brightness::new(level_from_factor(lowest_factor(&self.baseline.borrow())))
     }
 
     /// Runs something against a device context for this adapter.
@@ -57,7 +169,7 @@ impl Gamma {
     /// A device context is a scarce, session-scoped resource and this is an
     /// agent that lives for the whole login; keeping one open for hours to save
     /// a microsecond would be the wrong trade.
-    fn with_context<T>(&self, body: impl FnOnce(isize) -> Result<T>) -> Result<T> {
+    fn with_context<T>(&self, body: impl FnOnce(HDC) -> Result<T>) -> Result<T> {
         let name = to_wide(&self.adapter);
 
         // SAFETY: `name` is NUL terminated and live across the call. The three
@@ -79,11 +191,37 @@ impl Gamma {
             });
         }
 
-        let outcome = body(context as isize);
+        let outcome = body(context);
 
         // SAFETY: the context came from `CreateDCW` and is deleted exactly once.
         unsafe { DeleteDC(context) };
         outcome
+    }
+
+    /// Chooses the baseline that the ramp in front of us belongs to.
+    ///
+    /// Kept apart from the display work so the three cases — our last write,
+    /// our saved baseline, and somebody else's change — are visible together.
+    fn baseline_for(&self, current: &Ramp, saved: Option<&Ramp>) -> Ramp {
+        if let Some(last) = self.last_written.borrow().as_ref()
+            && same(current, last)
+        {
+            return *self.baseline.borrow();
+        }
+
+        if let Some(saved) = saved
+            && resembles(current, saved)
+        {
+            return *saved;
+        }
+
+        if resembles(current, &self.baseline.borrow()) {
+            return *self.baseline.borrow();
+        }
+
+        // Nothing we know about explains this table. Something else changed the
+        // calibration, so this is the state to scale from and later restore.
+        *current
     }
 }
 
@@ -93,88 +231,515 @@ impl Backend for Gamma {
     }
 
     fn get(&self) -> Result<Brightness> {
-        self.with_context(|context| {
-            let mut ramp = [0_u16; ENTRIES * 3];
+        let current = self.with_context(read)?;
+        let baseline = *self.baseline.borrow();
 
-            // SAFETY: the buffer is the 3 × 256 × `u16` this call documents.
-            let ok = unsafe { GetDeviceGammaRamp(context as *mut _, ramp.as_mut_ptr().cast()) };
-            if ok == 0 {
-                return Err(Error::MechanismFailed {
-                    mechanism: NAME,
-                    call: "GetDeviceGammaRamp",
-                    code: -1,
-                });
-            }
+        // A table that is exactly what this instance wrote is the best answer;
+        // otherwise invert the scale. A driver that quantises a little makes the
+        // two differ by a few counts, which the factor path absorbs.
+        if let Some(last) = self.last_written.borrow().as_ref()
+            && same(&current, last)
+        {
+            return Ok(Brightness::new(self.last_level.get()));
+        }
 
-            // The last entry of the red channel is the ramp's ceiling, which is
-            // what `set` scales.
-            Ok(from_ramp(
-                f32::from(ramp[ENTRIES - 1]) / f32::from(u16::MAX),
-            ))
-        })
+        Ok(Brightness::new(level_from_factor(factor_of(
+            &current, &baseline,
+        ))))
     }
 
     fn set(&self, level: Brightness) -> Result<()> {
-        let ceiling = to_ramp(level);
+        let _guard = lock();
+        let current = self.with_context(read)?;
+        let saved = load_state().remove(&self.key);
+        let baseline = self.baseline_for(&current, saved.as_ref());
 
-        self.with_context(|context| {
-            let mut ramp = [0_u16; ENTRIES * 3];
-            for entry in 0..ENTRIES {
-                // A linear ramp to the ceiling. The same shape macOS asks for
-                // with a maximum and a gamma of one, written out because this
-                // API takes the table rather than the formula.
-                let value = (entry as f32 / (ENTRIES - 1) as f32) * ceiling * f32::from(u16::MAX);
-                let value = value.round().clamp(0.0, f32::from(u16::MAX)) as u16;
+        if !same(&baseline, &self.baseline.borrow()) {
+            *self.baseline.borrow_mut() = baseline;
+        }
 
-                ramp[entry] = value;
-                ramp[ENTRIES + entry] = value;
-                ramp[ENTRIES * 2 + entry] = value;
-            }
+        // Stay above the point where Windows starts dropping the ramp. The
+        // caller composes this with an overlay, so a level below the floor is
+        // still reachable there; writing it here would only leave the old ramp
+        // on screen and report success.
+        let factor = to_factor(level).max(lowest_factor(&baseline));
+        let wanted = scale(&baseline, factor);
 
-            // SAFETY: the buffer is the 3 × 256 × `u16` this call documents.
-            let ok = unsafe { SetDeviceGammaRamp(context as *mut _, ramp.as_ptr().cast()) };
-            if ok == 0 {
-                return Err(Error::MechanismFailed {
-                    mechanism: NAME,
-                    call: "SetDeviceGammaRamp",
-                    code: -1,
-                });
-            }
-            Ok(())
-        })
+        // Save before the first dimming write, not after. A crash between the
+        // two is exactly the case this file exists for, and a baseline written
+        // for a level that never reached the display is harmless: it is checked
+        // against the ramp on the next open and discarded if it does not match.
+        // A drag writes the same baseline many times, so only touch the file
+        // when the saved curve is not already this one.
+        if factor < 1.0 && saved.as_ref() != Some(&baseline) {
+            save_baseline(&self.key, &baseline)?;
+        }
+
+        let observed = self.with_context(|context| {
+            write(context, &wanted)?;
+            read(context)
+        })?;
+
+        if !agrees(&observed, &wanted, &baseline, factor) {
+            // Put back what was there before. This is the one place where a
+            // failed write could otherwise leave a display darker than either
+            // its old state or the one asked for.
+            let _ = self.with_context(|context| write(context, &current));
+            return Err(Error::MechanismFailed {
+                mechanism: NAME,
+                call: "SetDeviceGammaRamp (read-back)",
+                code: -1,
+            });
+        }
+
+        *self.last_written.borrow_mut() = Some(wanted);
+        self.last_level.set(level_from_factor(factor));
+
+        if factor >= 1.0 {
+            remove_saved(&self.key)?;
+        }
+
+        Ok(())
+    }
+
+    fn release(&self) -> Result<()> {
+        let _guard = lock();
+        let current = self.with_context(read)?;
+        let baseline = *self.baseline.borrow();
+        let ours = self
+            .last_written
+            .borrow()
+            .as_ref()
+            .is_some_and(|last| same(&current, last))
+            || resembles(&current, &baseline);
+
+        if ours {
+            self.with_context(|context| {
+                write(context, &baseline)?;
+                let observed = read(context)?;
+                if same(&observed, &baseline) {
+                    Ok(())
+                } else {
+                    Err(Error::MechanismFailed {
+                        mechanism: NAME,
+                        call: "SetDeviceGammaRamp (release)",
+                        code: -1,
+                    })
+                }
+            })?;
+        }
+
+        *self.last_written.borrow_mut() = None;
+        *self.baseline.borrow_mut() = if ours { baseline } else { current };
+        self.last_level.set(1.0);
+        remove_saved(&self.key)
     }
 }
 
-/// The ramp ceiling that shows a given level.
-fn to_ramp(level: Brightness) -> f32 {
+/// Reads the ramp for a device context.
+fn read(context: HDC) -> Result<Ramp> {
+    let mut ramp = [0_u16; TABLE];
+
+    // SAFETY: the buffer is the 3 × 256 × `u16` this call documents.
+    let ok = unsafe { GetDeviceGammaRamp(context, ramp.as_mut_ptr().cast()) };
+    if ok == 0 {
+        return Err(Error::MechanismFailed {
+            mechanism: NAME,
+            call: "GetDeviceGammaRamp",
+            code: -1,
+        });
+    }
+
+    Ok(ramp)
+}
+
+/// Writes a ramp for a device context.
+fn write(context: HDC, ramp: &Ramp) -> Result<()> {
+    // SAFETY: the buffer is the 3 × 256 × `u16` this call documents.
+    let ok = unsafe { SetDeviceGammaRamp(context, ramp.as_ptr().cast()) };
+    if ok == 0 {
+        return Err(Error::MechanismFailed {
+            mechanism: NAME,
+            call: "SetDeviceGammaRamp",
+            code: -1,
+        });
+    }
+    Ok(())
+}
+
+/// The ramp factor that shows a given level.
+pub(crate) fn to_factor(level: Brightness) -> f32 {
     FLOOR + (1.0 - FLOOR) * level.fraction()
 }
 
-/// The level a given ceiling is showing.
-fn from_ramp(ceiling: f32) -> Brightness {
-    Brightness::new((ceiling - FLOOR) / (1.0 - FLOOR))
+/// The level a given factor is showing.
+pub(crate) fn level_from_factor(factor: f32) -> f32 {
+    ((factor - FLOOR) / (1.0 - FLOOR)).clamp(0.0, 1.0)
+}
+
+/// The lowest factor whose ramp Windows will still accept.
+///
+/// A calibrated baseline can be dimmer than identity at some entries, which
+/// leaves less room before that entry would cross the limit. The floor is
+/// therefore worked out from the curve in front of us rather than assumed to be
+/// exactly half.
+pub(crate) fn lowest_factor(baseline: &Ramp) -> f32 {
+    let mut required = 0.0_f32;
+
+    for index in 0..ENTRIES {
+        let identity = identity_entry(index);
+        let lowest = identity.saturating_sub(HEURISTIC);
+        if lowest == 0 {
+            continue;
+        }
+
+        for channel in 0..3 {
+            let base = baseline[channel * ENTRIES + index];
+            if base == 0 {
+                // This curve is already outside what Windows accepts; there is
+                // no scale factor that can bring it back. Refuse to dim rather
+                // than write a ramp that will be dropped.
+                required = 1.0;
+                continue;
+            }
+            required = required.max(f32::from(lowest) / f32::from(base));
+        }
+    }
+
+    (required + MARGIN).min(1.0)
+}
+
+/// The identity value at one entry of a channel.
+fn identity_entry(index: usize) -> u16 {
+    // 65535 / 255 = 257 exactly, so this ends at 65535 and needs no rounding.
+    u16::try_from(index * 257).unwrap_or(u16::MAX)
+}
+
+/// Whether a ramp stays inside the heuristic Windows documents.
+///
+/// Kept for tests: the formula in [`lowest_factor`] has to agree with what the
+/// API actually accepts, and this is the assertion that says so.
+#[cfg(test)]
+pub(crate) fn within_heuristic(ramp: &Ramp) -> bool {
+    ramp.iter()
+        .enumerate()
+        .all(|(index, entry)| entry.abs_diff(identity_entry(index % ENTRIES)) <= HEURISTIC)
+}
+
+/// Scales a baseline table towards black.
+pub(crate) fn scale(baseline: &Ramp, factor: f32) -> Ramp {
+    let mut scaled = [0_u16; TABLE];
+    for (entry, base) in scaled.iter_mut().zip(baseline) {
+        *entry = (f32::from(*base) * factor)
+            .round()
+            .clamp(0.0, f32::from(u16::MAX)) as u16;
+    }
+    scaled
+}
+
+/// The scale factor a table appears to have relative to a baseline.
+fn factor_of(table: &Ramp, baseline: &Ramp) -> f32 {
+    let ceiling = baseline.iter().copied().max().unwrap_or(0);
+    if ceiling == 0 {
+        return 1.0;
+    }
+    f32::from(table.iter().copied().max().unwrap_or(0)) / f32::from(ceiling)
+}
+
+/// Whether two tables are the same curve within the tolerance of the API.
+fn same(left: &Ramp, right: &Ramp) -> bool {
+    left.iter()
+        .zip(right)
+        .all(|(left, right)| left.abs_diff(*right) <= TOLERANCE)
+}
+
+/// Whether a table is a baseline or a scaled copy of it.
+fn resembles(table: &Ramp, baseline: &Ramp) -> bool {
+    let factor = factor_of(table, baseline);
+    same(table, baseline) || same(table, &scale(baseline, factor))
+}
+
+/// Whether a read-back is the curve that was written.
+fn agrees(observed: &Ramp, wanted: &Ramp, baseline: &Ramp, factor: f32) -> bool {
+    same(observed, wanted)
+        || (factor_of(observed, baseline) - factor).abs() <= FACTOR_TOLERANCE
+            && resembles(observed, baseline)
+}
+
+/// Takes the process-wide gamma lock, recovering a poisoned one.
+fn lock() -> MutexGuard<'static, ()> {
+    GAMMA_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The path of the ramp-baseline file, when this platform has a configuration
+/// directory.
+fn state_path() -> Option<PathBuf> {
+    Some(super::config_directory()?.join(STATE_FILE))
+}
+
+/// Reads every saved baseline. A missing or unreadable file is an empty one:
+/// the worst case is a ramp that cannot be recovered automatically after a
+/// crash, which is why the floor exists.
+fn load_state() -> BTreeMap<String, Ramp> {
+    let Some(path) = state_path() else {
+        return BTreeMap::new();
+    };
+
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(problem) if problem.kind() == std::io::ErrorKind::NotFound => {
+            return BTreeMap::new();
+        }
+        Err(problem) => {
+            eprintln!("klart: could not read {}: {problem}", path.display());
+            return BTreeMap::new();
+        }
+    };
+
+    parse_state(&text)
+}
+
+/// Parses the state file, ignoring lines it cannot understand.
+fn parse_state(text: &str) -> BTreeMap<String, Ramp> {
+    let mut baselines = BTreeMap::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(ramp) = decode(value.trim()) {
+            baselines.insert(key.to_owned(), ramp);
+        }
+    }
+
+    baselines
+}
+
+/// Writes the state file, leaving the old one in place if anything fails.
+fn write_state(baselines: &BTreeMap<String, Ramp>) -> Result<()> {
+    let Some(path) = state_path() else {
+        return Ok(());
+    };
+    if let Some(directory) = path.parent() {
+        std::fs::create_dir_all(directory).map_err(|_| Error::MechanismFailed {
+            mechanism: NAME,
+            call: "create_dir_all",
+            code: -1,
+        })?;
+    }
+
+    let temporary = path.with_extension("conf.new");
+    std::fs::write(&temporary, render_state(baselines)).map_err(|_| Error::MechanismFailed {
+        mechanism: NAME,
+        call: "write gamma.conf",
+        code: -1,
+    })?;
+    std::fs::rename(&temporary, &path).map_err(|_| Error::MechanismFailed {
+        mechanism: NAME,
+        call: "rename gamma.conf",
+        code: -1,
+    })?;
+    Ok(())
+}
+
+/// Adds or replaces one saved baseline.
+fn save_baseline(key: &str, ramp: &Ramp) -> Result<()> {
+    let mut baselines = load_state();
+    baselines.insert(key.to_owned(), *ramp);
+    write_state(&baselines)
+}
+
+/// Forgets one saved baseline.
+fn remove_saved(key: &str) -> Result<()> {
+    let mut baselines = load_state();
+    if baselines.remove(key).is_some() {
+        write_state(&baselines)?;
+    }
+    Ok(())
+}
+
+/// Renders the state file.
+fn render_state(baselines: &BTreeMap<String, Ramp>) -> String {
+    let mut text = String::from(
+        "# Original gamma ramps that klart scaled down.\n\
+         # Written before dimming and removed when the ramp is given back, so a\n\
+         # crash can be recovered from. Editing this by hand is not useful.\n",
+    );
+
+    for (key, ramp) in baselines {
+        let _ = writeln!(text, "{key} = {}", encode(ramp));
+    }
+    text
+}
+
+/// A ramp as one line of four-hex-digit entries.
+fn encode(ramp: &Ramp) -> String {
+    let mut text = String::with_capacity(TABLE * 4);
+    for entry in ramp {
+        let _ = write!(text, "{entry:04x}");
+    }
+    text
+}
+
+/// The inverse of [`encode`], rejecting anything that is not exactly a ramp.
+fn decode(text: &str) -> Option<Ramp> {
+    if text.len() != TABLE * 4 || !text.is_ascii() {
+        return None;
+    }
+
+    let mut ramp = [0_u16; TABLE];
+    for (index, entry) in ramp.iter_mut().enumerate() {
+        let start = index * 4;
+        *entry = u16::from_str_radix(&text[start..start + 4], 16).ok()?;
+    }
+    Some(ramp)
+}
+
+/// The identity table every channel starts from, for tests in this module and
+/// the composition that sits above it.
+#[cfg(test)]
+pub(crate) fn identity_ramp() -> Ramp {
+    let mut ramp = [0_u16; TABLE];
+    for entry in 0..ENTRIES {
+        let value = identity_entry(entry);
+        ramp[entry] = value;
+        ramp[ENTRIES + entry] = value;
+        ramp[ENTRIES * 2 + entry] = value;
+    }
+    ramp
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn identity() -> Ramp {
+        identity_ramp()
+    }
+
     #[test]
-    fn levels_round_trip_through_the_ramp() {
+    fn levels_round_trip_through_the_factor() {
         for whole in 0..=100u8 {
             let level = Brightness::from_percent(f32::from(whole));
-            assert_eq!(from_ramp(to_ramp(level)).percent_rounded(), whole);
+            assert_eq!(
+                Brightness::new(level_from_factor(to_factor(level))).percent_rounded(),
+                whole
+            );
         }
     }
 
     #[test]
     fn the_dimmest_level_still_leaves_something_on_the_screen() {
-        assert_eq!(to_ramp(Brightness::MIN), FLOOR);
-        assert!(to_ramp(Brightness::MIN) > 0.0);
+        assert_eq!(to_factor(Brightness::MIN), FLOOR);
+        assert!(to_factor(Brightness::MIN) > 0.0);
     }
 
     #[test]
     fn the_brightest_level_is_the_ramp_untouched() {
-        assert_eq!(to_ramp(Brightness::MAX), 1.0);
+        assert_eq!(to_factor(Brightness::MAX), 1.0);
+        let baseline = identity();
+        assert_eq!(scale(&baseline, 1.0), baseline);
+    }
+
+    #[test]
+    fn a_scaled_ramp_is_recognised_as_a_scaled_ramp() {
+        let baseline = identity();
+        let scaled = scale(&baseline, 0.4);
+
+        assert!(resembles(&scaled, &baseline));
+        assert!((factor_of(&scaled, &baseline) - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn the_lowest_ramp_is_one_windows_accepts() {
+        let baseline = identity();
+        let floor = lowest_factor(&baseline);
+
+        assert!(
+            (0.5..0.55).contains(&floor),
+            "the measured Windows cliff is at half brightness, not {floor}"
+        );
+        assert!(
+            within_heuristic(&scale(&baseline, floor)),
+            "the ramp written at the floor must stay inside the API heuristic"
+        );
+        assert!(
+            !within_heuristic(&scale(&baseline, floor - 0.02)),
+            "the test has to fail on the curve that used to be dropped"
+        );
+    }
+
+    #[test]
+    fn a_darker_baseline_needs_a_higher_floor() {
+        // Night Light and ICC profiles do not leave an identity curve. Scaling
+        // an already-dimmed entry leaves less room before it crosses the limit,
+        // so the floor has to move up rather than being hard-coded to half.
+        let baseline = identity();
+        let darker = scale(&baseline, 0.85);
+
+        assert!(
+            lowest_factor(&darker) > lowest_factor(&baseline),
+            "a darker starting curve cannot be scaled as far"
+        );
+    }
+
+    #[test]
+    fn a_different_curve_is_not_mistaken_for_our_dimmed_one() {
+        let baseline = identity();
+        let mut changed = baseline;
+        // A calibration change that is not a uniform scale: crush the blue
+        // channel, which is what a colour profile does.
+        for entry in &mut changed[ENTRIES * 2..] {
+            *entry /= 2;
+        }
+
+        assert!(
+            !resembles(&changed, &baseline),
+            "a changed curve must become the new baseline rather than be restored over"
+        );
+    }
+
+    #[test]
+    fn a_ramp_survives_the_state_file_round_trip() {
+        let baseline = identity();
+        let text = render_state(&BTreeMap::from([(
+            "SAM-71e3-HNAW900001".to_owned(),
+            baseline,
+        )]));
+        let read_back = parse_state(&text);
+
+        assert_eq!(read_back.get("SAM-71e3-HNAW900001"), Some(&baseline));
+    }
+
+    #[test]
+    fn a_truncated_ramp_is_ignored_rather_than_half_read() {
+        let text = "SAM = 0000\n";
+        assert!(parse_state(text).is_empty());
+    }
+
+    #[test]
+    fn state_keys_survive_a_hash() {
+        // Two identical monitors are told apart by a `#` in the key, which is
+        // why this is not treated as a comment when it is not leading.
+        let baseline = identity();
+        let text = render_state(&BTreeMap::from([(
+            "SAM-71e3-00000000#1".to_owned(),
+            baseline,
+        )]));
+        assert_eq!(
+            parse_state(&text).get("SAM-71e3-00000000#1"),
+            Some(&baseline)
+        );
     }
 }

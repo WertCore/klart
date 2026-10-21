@@ -23,11 +23,11 @@ mod autostart;
 mod backend;
 mod brightness;
 // Composes a backlight with a software fallback, so only a platform that has
-// both reaches for it. macOS does; Linux has no gamma ramp without a display
-// server, so nothing there constructs one. The logic and its tests are
+// both reaches for it. macOS and Windows do; Linux has no gamma ramp without a
+// display server, so nothing there constructs one. The logic and its tests are
 // platform-free and stay in the build on every target.
 #[cfg_attr(
-    not(target_os = "macos"),
+    not(any(target_os = "macos", target_os = "windows")),
     allow(dead_code, reason = "no software fallback on this platform yet")
 )]
 mod combined;
@@ -69,3 +69,25 @@ pub use error::{Error, Result};
 pub use identity::DisplayKey;
 pub use platform::{login_item, set_login_item};
 pub use remembered::{Combined, Remembered, path as remembered_path};
+
+/// Keeps Windows HDR overlays below a window the tray has opened.
+///
+/// The overlay is a topmost black window, so a panel drawn over it would
+/// otherwise be dimmed along with everything else. Passing the panel's handle
+/// puts every visible overlay directly below it; passing zero restores the
+/// normal order. This does nothing on platforms that dim with a backlight or a
+/// gamma ramp.
+#[cfg(target_os = "windows")]
+pub fn set_overlay_anchor(anchor: isize) {
+    platform::set_overlay_anchor(anchor);
+}
+
+/// Hides every Windows HDR overlay.
+///
+/// Called on the way out as a belt-and-braces release. The windows belong to
+/// this process and would vanish with it, but an agent that can give the screen
+/// back before exiting should.
+#[cfg(target_os = "windows")]
+pub fn clear_overlays() {
+    platform::clear_overlays();
+}

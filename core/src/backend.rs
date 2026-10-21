@@ -19,8 +19,10 @@ pub trait Backend {
     /// Whether a change made through this mechanism outlives the process.
     ///
     /// True for anything that moves a backlight, because the setting lives in
-    /// the display. False for the gamma ramp, which macOS reverts the moment the
-    /// process that set it exits.
+    /// the display, and for a Windows gamma ramp, which Windows leaves in place.
+    /// False for the macOS gamma ramp, which the window server reverts when the
+    /// process that set it exits, and for an HDR overlay, which is a window and
+    /// goes away with its process.
     fn persists(&self) -> bool {
         true
     }
@@ -42,4 +44,27 @@ pub trait Backend {
     ///
     /// As [`Backend::get`].
     fn set(&self, level: Brightness) -> Result<()>;
+
+    /// Where a hardware floor meets a software fallback, as a percentage.
+    ///
+    /// Most mechanisms drive one thing and have no seam. A composed control
+    /// does: below this point the picture is being dimmed rather than the
+    /// backlight, and a person dragging it deserves to see where that starts.
+    fn seam(&self) -> Option<u8> {
+        None
+    }
+
+    /// Gives back anything this mechanism is holding for the process.
+    ///
+    /// Called when the agent is about to exit. A backlight has nothing to give
+    /// back; a software overlay or a gamma ramp does, and leaving one in place
+    /// would hold a display at a level nobody is left to change.
+    ///
+    /// # Errors
+    ///
+    /// As [`Backend::set`]. A release that fails is still worth attempting on
+    /// the way out, so callers report it and carry on.
+    fn release(&self) -> Result<()> {
+        Ok(())
+    }
 }

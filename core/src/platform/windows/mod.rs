@@ -1,30 +1,35 @@
 //! Brightness on Windows.
 //!
-//! Three mechanisms, and unlike macOS every one of them is documented, supported
-//! public API:
+//! Two real backlight mechanisms, both documented public API, and a software
+//! fallback that can be composed with either:
 //!
 //! - external monitors, through the Monitor Configuration API in `dxva2`, which
 //!   is DDC/CI with the driver doing the framing
 //! - the machine's own panel, through WMI
-//! - the gamma ramp, for anything that answers neither
+//! - a gamma ramp in SDR, with a black overlay below the lowest ramp Windows
+//!   accepts, or a black overlay from the start when HDR is on or unknown, for
+//!   the range below the backlight's own minimum
 //!
 //! Because the driver speaks DDC/CI on this platform's behalf, [`crate::ddc`] is
 //! not used here at all. The protocol that macOS and Linux hand-roll is inside
 //! `dxva2`, which also reports the monitor's own minimum and maximum rather than
 //! making the caller discover them.
 //!
-//! Written against Microsoft's documentation. It has never run: see `PLAN.md`.
+//! Run against real hardware; see `PLAN.md` for what was and was not verified.
 //!
 mod autostart;
 mod gamma;
 mod hdr;
 mod monitors;
+mod overlay;
 mod panel;
 mod physical;
+mod software;
 
 use std::path::PathBuf;
 
 use crate::backend::Backend;
+use crate::combined::Combined;
 use crate::diagnose::{Attempt, Note, Report, Verdict};
 use crate::display::{Bounds, Display, DisplayKind, Found};
 use crate::edid;
@@ -35,8 +40,10 @@ pub use self::autostart::{set as set_login_item, status as login_item};
 
 use self::gamma::Gamma;
 use self::monitors::Monitor;
+use self::overlay::Overlay;
 use self::panel::Wmi;
 use self::physical::Physical;
+use self::software::Software;
 
 /// Every monitor attached to the machine.
 ///
@@ -97,12 +104,22 @@ fn found(index: usize, monitor: &Monitor) -> Found {
 
 /// Opens the best mechanism that will have this display.
 ///
-/// DDC/CI first, then the gamma ramp, in the same order and for the same reason
-/// as everywhere else: one moves a backlight and the other darkens a picture.
+/// DDC/CI first, then WMI, then a software fallback, in the same order and for
+/// the same reason as everywhere else: a backlight is the real thing and a ramp
+/// or overlay only darkens the picture. The software half is composed with a
+/// backlight when one answers, so the bottom of the range can go below the
+/// display's own minimum without giving up hardware control above it.
+///
+/// The software mechanism depends on HDR. While HDR is on, or when it cannot be
+/// read, Windows does not promise what a gamma ramp does; a black overlay is
+/// defined in either mode, so that is what the dark end uses. When HDR is
+/// definitely off, the ramp does the work Windows will accept and an overlay
+/// carries the bottom of the range, where Windows would reject the ramp.
 ///
 /// # Errors
 ///
-/// When neither answers, which means the monitor has gone away.
+/// When neither a backlight nor a software fallback can be opened, which means
+/// the monitor has gone away.
 pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> {
     let mut refusals = Vec::new();
     let key = display.key().to_string();
@@ -114,27 +131,120 @@ pub(crate) fn open(display: &Display) -> Result<(Box<dyn Backend>, Vec<Error>)> 
         });
     };
 
-    match Physical::open(monitor.handle, &key) {
-        Ok(external) => return Ok((Box::new(external), refusals)),
-        Err(refusal) => refusals.push(refusal),
-    }
+    let backlight: Option<Box<dyn Backend>> = match Physical::open(monitor.handle, &key) {
+        Ok(external) => Some(Box::new(external)),
+        Err(refusal) => {
+            refusals.push(refusal);
 
-    // Only ever the panel this display *is*. WMI's brightness applies to a
-    // monitor of its choosing unless told which, so `Wmi::open` matches on the
-    // device instance path — without that, dimming an external monitor would
-    // dim the laptop screen instead.
-    match monitor.instance.as_deref() {
-        Some(instance) => match Wmi::open(instance, &key) {
-            Ok(built_in) => return Ok((Box::new(built_in), refusals)),
-            Err(refusal) => refusals.push(refusal),
-        },
-        None => refusals.push(Error::CannotReach {
-            mechanism: panel::NAME,
-            display: key.clone(),
+            // Only ever the panel this display *is*. WMI's brightness applies
+            // to a monitor of its choosing unless told which, so `Wmi::open`
+            // matches on the device instance path — without that, dimming an
+            // external monitor would dim the laptop screen instead.
+            match monitor.instance.as_deref() {
+                Some(instance) => match Wmi::open(instance, &key) {
+                    Ok(built_in) => Some(Box::new(built_in)),
+                    Err(refusal) => {
+                        refusals.push(refusal);
+                        None
+                    }
+                },
+                None => {
+                    refusals.push(Error::CannotReach {
+                        mechanism: panel::NAME,
+                        display: key.clone(),
+                    });
+                    None
+                }
+            }
+        }
+    };
+
+    let hdr = monitor.instance.as_deref().and_then(hdr::enabled_for);
+    let software: Option<Box<dyn Backend>> = if hdr == Some(false) {
+        match Gamma::open(&monitor.adapter, &key) {
+            Ok(gamma) => match Software::open(display, gamma) {
+                Ok((software, refusal)) => {
+                    if let Some(refusal) = refusal {
+                        refusals.push(refusal);
+                    }
+                    Some(Box::new(software))
+                }
+                Err(refusal) => {
+                    refusals.push(refusal);
+                    None
+                }
+            },
+            Err(refusal) => {
+                refusals.push(refusal);
+                None
+            }
+        }
+    } else {
+        match Overlay::open(display) {
+            Ok(overlay) => Some(Box::new(overlay)),
+            Err(refusal) => {
+                refusals.push(refusal);
+                None
+            }
+        }
+    };
+
+    match (backlight, software) {
+        (Some(hardware), Some(software)) => {
+            // Read both before composing them. If one has already stopped
+            // answering, the other is still a usable control; losing it because
+            // the pair could not be read would be worse than the lower range.
+            let hardware_level = hardware.get();
+            let software_level = software.get();
+
+            match (hardware_level, software_level) {
+                (Ok(hardware_level), Ok(software_level)) => Ok((
+                    Box::new(Combined::from_levels(
+                        hardware,
+                        software,
+                        hardware_level,
+                        software_level,
+                    )),
+                    refusals,
+                )),
+                (Ok(_), Err(refusal)) => {
+                    refusals.push(refusal);
+                    Ok((hardware, refusals))
+                }
+                (Err(refusal), Ok(_)) => {
+                    refusals.push(refusal);
+                    Ok((software, refusals))
+                }
+                (Err(hardware_refusal), Err(software_refusal)) => {
+                    refusals.push(hardware_refusal);
+                    refusals.push(software_refusal);
+                    Err(Error::CannotReach {
+                        mechanism: "any",
+                        display: key,
+                    })
+                }
+            }
+        }
+        (Some(hardware), None) => Ok((hardware, refusals)),
+        (None, Some(software)) => Ok((software, refusals)),
+        (None, None) => Err(Error::CannotReach {
+            mechanism: "any",
+            display: key,
         }),
     }
+}
 
-    Ok((Box::new(Gamma::open(&monitor.adapter)?), refusals))
+/// Keeps software overlays below the tray panel while it is open.
+///
+/// Zero puts them back above ordinary windows. Does nothing on a display that
+/// is not using an overlay.
+pub(crate) fn set_overlay_anchor(anchor: isize) {
+    overlay::anchor(anchor);
+}
+
+/// Hides every software overlay, for an agent that is shutting down.
+pub(crate) fn clear_overlays() {
+    overlay::clear_all();
 }
 
 /// The monitor a display came from, matched on its own EDID.

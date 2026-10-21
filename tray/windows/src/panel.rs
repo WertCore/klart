@@ -65,6 +65,10 @@ pub struct SliderSpec {
     pub caption: String,
     pub percent: u8,
     pub transient: bool,
+    /// Where the backlight reaches its floor and the picture starts being
+    /// dimmed instead, as a percentage. Drawn as a tick on the track so the
+    /// change in what the slider is doing is visible before it is felt.
+    pub seam: Option<u8>,
 }
 
 /// One clickable row underneath the sliders.
@@ -102,6 +106,7 @@ struct Slider {
     caption: String,
     percent: u8,
     transient: bool,
+    seam: Option<u8>,
     label: RECT,
     track: RECT,
 }
@@ -251,6 +256,7 @@ unsafe fn show_inner(
                 caption: spec.caption,
                 percent: spec.percent,
                 transient: spec.transient,
+                seam: spec.seam,
                 label: RECT {
                     left: 0,
                     top: 0,
@@ -361,6 +367,10 @@ unsafe fn show_inner(
         SetFocus(hwnd);
     }
 
+    // A black HDR overlay is topmost as well. Keep it below the panel rather
+    // than over the slider that is controlling it.
+    klart_core::set_overlay_anchor(hwnd as isize);
+
     Some(panel)
 }
 
@@ -394,7 +404,7 @@ impl Panel {
             };
             y += dpi(TRACK_HEIGHT, self.dpi);
 
-            if slider.transient {
+            if slider.transient || slider.seam.is_some() {
                 y += dpi(NOTE_HEIGHT, self.dpi);
             }
             y += dpi(ROW_GAP, self.dpi);
@@ -627,6 +637,17 @@ impl Panel {
                 rounded(hdc, filled, self.palette.fill, bar / 2);
             }
 
+            if let Some(seam) = slider.seam {
+                let x = left + ((right - left) as f32 * f32::from(seam) / 100.0).round() as i32;
+                let tick = RECT {
+                    left: x,
+                    top: track.top - dpi(3, self.dpi),
+                    right: (x + dpi(2, self.dpi)).min(right),
+                    bottom: track.bottom + dpi(3, self.dpi),
+                };
+                fill(hdc, tick, self.palette.dim);
+            }
+
             dot(
                 hdc,
                 filled_right,
@@ -636,7 +657,22 @@ impl Panel {
                 self.palette.knob_edge,
             );
 
-            if slider.transient {
+            if let Some(seam) = slider.seam {
+                let mut note = RECT {
+                    left: slider.track.left + dpi(10, self.dpi),
+                    top: slider.track.bottom,
+                    right: slider.track.right,
+                    bottom: slider.track.bottom + dpi(NOTE_HEIGHT, self.dpi),
+                };
+                draw(
+                    hdc,
+                    &format!("\u{00b7} below {seam}% dims the picture"),
+                    &mut note,
+                    self.palette.dim,
+                    self.fonts.regular(),
+                    DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX,
+                );
+            } else if slider.transient {
                 let mut note = RECT {
                     left: slider.track.left + dpi(10, self.dpi),
                     top: slider.track.bottom,
@@ -787,6 +823,11 @@ impl Panel {
 
 impl Drop for Panel {
     fn drop(&mut self) {
+        // The overlay is topmost again once its anchor is gone. Do this before
+        // the window it names is destroyed, so an overlay never keeps a dead
+        // handle as its insertion point.
+        klart_core::set_overlay_anchor(0);
+
         // SAFETY: the window belongs to this panel, and the user data is
         // cleared first so the destroy messages cannot reach the `Panel` that
         // is halfway through being dropped.

@@ -59,13 +59,84 @@ pub fn table(controls: &[&Control], indices: &[usize], verbose: bool) {
     }
 }
 
-/// Says plainly when a change has already been undone.
+/// Explains what the software half of a changed level will do next.
 ///
 /// macOS reverts a gamma ramp when the process that set it exits, so a `set` on
 /// a display with no hardware mechanism has done nothing by the time this
 /// process returns. Printing the new level and stopping there would be a lie.
-pub fn warn_about_anything_that_will_not_last(controls: &[&Control]) {
+///
+/// Windows is the opposite: a gamma ramp outlives the process, and an overlay
+/// window vanishes with it. A gamma ramp left scaled is not a lie, but it is a
+/// state somebody needs to know how to leave.
+pub fn warn_about_software_dimming(controls: &[&Control]) {
     for control in controls {
+        #[cfg(target_os = "windows")]
+        {
+            match control.mechanism() {
+                Some("hardware+gamma" | "gamma") => {
+                    let seam = control.seam().unwrap_or(100);
+                    if control
+                        .get()
+                        .is_ok_and(|level| level.percent_rounded() < seam)
+                    {
+                        eprintln!(
+                            "klart: part of {}'s level is being held by a gamma ramp that \
+                             outlives this command. Set it back to 100%, or use the tray's \
+                             Reset software dimming, to give it back.",
+                            control.name()
+                        );
+                    }
+                }
+                Some("hardware+gamma+overlay" | "gamma+overlay") => {
+                    let seam = control.seam().unwrap_or(100);
+                    let below = control
+                        .get()
+                        .is_ok_and(|level| level.percent_rounded() < seam);
+
+                    if !control.persists() {
+                        eprintln!(
+                            "klart: part of {}'s level is a gamma ramp that outlives this \
+                             command, and the darkest part is an overlay window that disappears \
+                             with it — leaving the display at the ramp's floor. Set it back to \
+                             100%, or use the tray's Reset software dimming, to give both back.",
+                            control.name()
+                        );
+                    } else if below {
+                        eprintln!(
+                            "klart: part of {}'s level is being held by a gamma ramp that \
+                             outlives this command. Set it back to 100%, or use the tray's \
+                             Reset software dimming, to give it back.",
+                            control.name()
+                        );
+                    }
+                }
+                Some("hardware+overlay" | "overlay") => {
+                    let seam = control.seam().unwrap_or(100);
+                    if control
+                        .get()
+                        .is_ok_and(|level| level.percent_rounded() < seam)
+                    {
+                        eprintln!(
+                            "klart: part of {}'s level is an overlay window that disappears \
+                             with this command — so the change is already gone. Only a process \
+                             that keeps running can hold it; `klart-tray` is that process.",
+                            control.name()
+                        );
+                    }
+                }
+                _ => {
+                    if !control.persists() {
+                        eprintln!(
+                            "klart: part of {}'s level is held by software that only lasts \
+                             while a process is running; `klart-tray` is that process.",
+                            control.name()
+                        );
+                    }
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
         if !control.persists() {
             eprintln!(
                 "klart: part of {}'s level is being held by its gamma ramp, which macOS puts \

@@ -35,6 +35,8 @@ enum Message {
     Set { display: usize, percent: u8 },
     /// Enumerate the displays again, because the set may have changed.
     Refresh,
+    /// Give back anything the controls are holding, and wait for it.
+    Release { done: Sender<()> },
     /// Stop, releasing the COM apartment on the thread that made it.
     Stop,
 }
@@ -68,6 +70,22 @@ impl Writer {
     pub fn refresh(&self) {
         let _ = self.sender.send(Message::Refresh);
     }
+
+    /// Gives back what this thread's controls are holding, and waits.
+    ///
+    /// The controls here are a second set from the driver's: each opened its
+    /// own gamma baseline. Releasing only the driver's would leave this set
+    /// scaling the old, already-dimmed table the next time a slider moved.
+    pub fn release(&self) {
+        let (done, wait) = channel();
+        if self.sender.send(Message::Release { done }).is_ok() {
+            // Wait for the acknowledgement rather than guessing how long a
+            // display takes. The same thread is joined on the way out already,
+            // so a wedged driver was always going to hold the exit; at least
+            // this way the release cannot land after the state has been saved.
+            let _ = wait.recv();
+        }
+    }
 }
 
 impl Drop for Writer {
@@ -94,8 +112,15 @@ fn run(receiver: Receiver<Message>) {
         match message {
             Message::Stop => return,
             Message::Refresh => {
-                displays = controls().unwrap_or_default();
+                let next = controls().unwrap_or_default();
+                release_changed(&displays, &next);
+                displays = next;
                 pending = vec![None; displays.len()];
+            }
+            Message::Release { done } => {
+                release(&displays);
+                pending.fill(None);
+                let _ = done.send(());
             }
             Message::Set { display, percent } => {
                 if let Some(slot) = pending.get_mut(display) {
@@ -126,11 +151,52 @@ fn drain(
                 }
             }
             Ok(Message::Refresh) => {
-                *displays = controls().unwrap_or_default();
+                let next = controls().unwrap_or_default();
+                release_changed(displays, &next);
+                *displays = next;
                 *pending = vec![None; displays.len()];
+            }
+            Ok(Message::Release { done }) => {
+                release(displays);
+                pending.fill(None);
+                let _ = done.send(());
             }
             Ok(Message::Stop) | Err(TryRecvError::Disconnected) => return false,
             Err(TryRecvError::Empty) => return true,
+        }
+    }
+}
+
+/// Gives back the software half of a control that has gone or changed shape.
+///
+/// A pending write may have reached an old control just before the refresh, and
+/// on Windows a gamma ramp would outlive the object that wrote it. Releasing a
+/// display that is still here through the same mechanism would only flash the
+/// screen; releasing the one that was unplugged, or whose HDR state changed the
+/// mechanism, is what keeps a stale ramp from sitting under a new overlay.
+fn release_changed(old: &[Control], new: &[Control]) {
+    for control in old {
+        let still_here = new.iter().any(|replacement| {
+            replacement.display().key() == control.display().key()
+                && replacement.mechanism() == control.mechanism()
+        });
+        if still_here || control.mechanism().is_none() {
+            continue;
+        }
+        if let Err(problem) = control.release() {
+            eprintln!("klart-tray: {}: {problem}", control.name());
+        }
+    }
+}
+
+/// Gives back what every control is holding.
+fn release(displays: &[Control]) {
+    for control in displays {
+        if control.mechanism().is_none() {
+            continue;
+        }
+        if let Err(problem) = control.release() {
+            eprintln!("klart-tray: {}: {problem}", control.name());
         }
     }
 }

@@ -43,8 +43,7 @@ mod writer;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use klart_core::controls;
-use klart_core::{Combined, LoginItem};
+use klart_core::{Combined, LoginItem, clear_overlays, controls};
 use klart_tray_common::driver::Driver;
 use panel::{CommandSpec, SliderSpec, Target};
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -82,7 +81,8 @@ const WM_PANEL_COMMAND: u32 = WM_APP + 3;
 const CMD_KEEP_OFFSETS: u32 = 1;
 const CMD_LOGIN_ITEM: u32 = 2;
 const CMD_REFRESH: u32 = 3;
-const CMD_QUIT: u32 = 4;
+const CMD_RESET_SOFTWARE: u32 = 4;
+const CMD_QUIT: u32 = 5;
 
 /// The icon's identifier within the shell, and the timer's within the window.
 const ICON_ID: u32 = 1;
@@ -616,6 +616,7 @@ impl App {
                 // the levels to measure from.
                 percent: self.driver.open_combined(),
                 transient: false,
+                seam: None,
             });
         }
 
@@ -625,6 +626,7 @@ impl App {
                 caption: control.name().to_owned(),
                 percent: control.get().map_or(0, |level| level.percent_rounded()),
                 transient: !control.persists(),
+                seam: control.seam(),
             });
         }
 
@@ -633,7 +635,7 @@ impl App {
 
     /// The rows underneath the sliders.
     fn commands(&self) -> Vec<CommandSpec> {
-        let mut commands = Vec::with_capacity(4);
+        let mut commands = Vec::with_capacity(5);
 
         // Only when there is a combined slider for it to affect. A setting whose
         // effect is not on screen is a setting nobody can connect to anything.
@@ -658,6 +660,27 @@ impl App {
             checked: None,
             enabled: true,
         });
+
+        // The escape hatch for a software half that is holding a display dark.
+        // Quitting does the same thing, but somebody who has just lost track of
+        // a dim screen should not have to find and restart the agent to get it
+        // back.
+        if self.driver.controls().iter().any(|control| {
+            control.seam().is_some()
+                || !control.persists()
+                || matches!(
+                    control.mechanism(),
+                    Some("gamma" | "gamma+overlay" | "overlay")
+                )
+        }) {
+            commands.push(CommandSpec {
+                id: CMD_RESET_SOFTWARE,
+                text: "Reset software dimming".to_owned(),
+                checked: None,
+                enabled: true,
+            });
+        }
+
         commands.push(CommandSpec {
             id: CMD_QUIT,
             text: "Quit klart".to_owned(),
@@ -688,6 +711,15 @@ impl App {
                 }
             }
             CMD_REFRESH => self.look_again(),
+            CMD_RESET_SOFTWARE => {
+                if let Some(writer) = self.writer.as_ref() {
+                    writer.release();
+                }
+                self.driver.release();
+                self.driver.remember_current();
+                self.driver.persist();
+                clear_overlays();
+            }
             CMD_QUIT => {
                 // SAFETY: ends the message loop; the agent's `Drop` removes the
                 // icon and destroys the window on the way out.
@@ -869,6 +901,17 @@ impl Drop for App {
     fn drop(&mut self) {
         // First, so the popup's window is gone before the owner it posts to.
         self.panel = None;
+
+        // The writer may still be inside a display write. Let it finish and
+        // release its own controls before the message thread gives its set
+        // back, so no write can land after the reset.
+        if let Some(writer) = self.writer.as_ref() {
+            writer.release();
+        }
+        self.writer = None;
+        self.driver.release();
+        clear_overlays();
+
         self.remove_icon();
 
         // SAFETY: the icon came from `CreateIconIndirect` exactly when
@@ -894,10 +937,10 @@ impl Drop for App {
 
 /// The command that decides whether the agent comes back after a restart.
 ///
-/// Worth a row rather than leaving it to Task Manager: a display dimmed with a
-/// gamma ramp is back at full brightness once this process exits, so an agent
-/// that does not start at login means that display is full brightness after
-/// every restart.
+/// Worth a row rather than leaving it to Task Manager: a level below the
+/// backlight's floor is held by software that a running agent has to put back,
+/// so an agent that does not start at login means that display starts at its
+/// hardware floor after every restart rather than at the level chosen.
 fn login_item_command() -> CommandSpec {
     let state = klart_core::login_item();
 

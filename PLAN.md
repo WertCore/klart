@@ -1143,3 +1143,94 @@ still `klart-tray`, `tray/windows` is still `klart-tray-windows` with a
 `klart-tray.exe` binary, and `tray/common` is still `klart-tray-common`. The
 packaging script now names the two macOS binaries rather than building the
 workspace, which would have stopped in the Windows crate's `compile_error!`.
+
+## 34. Past the backlight floor on Windows
+
+- [x] Compose the backlight with the software half on Windows, with the same
+      quarter-width seam as macOS
+- [x] Use a baseline-preserving gamma ramp when HDR is definitely off
+- [x] Use a per-display overlay when HDR is on or cannot be read
+- [x] Save the original ramp in `gamma.conf` before the first scaled write, and
+      remove the entry when the ramp is given back
+- [x] Release software dimming on quit and from a panel row; remember the
+      resulting seam level after a reset
+- [x] Draw the seam tick and the "below 25% dims the picture" note, and keep the
+      panel above an overlay while it is open
+- [x] Drag below the seam on a real SDR panel, reset it, quit, and restart it
+- [ ] Run the overlay path on a display that is actually in HDR
+
+The composition itself was already platform-free; what Windows needed was the
+software half and the rules for holding and giving it back. Above 25% the Monitor
+Configuration API or WMI moves the backlight. Below it the backlight stays at its
+own minimum and the remaining range goes to a gamma ramp in SDR, or to a black
+layered window when HDR is on or unknown. The gamma ramp is a scaled copy of
+whatever was there first, read back and compared rather than trusted, so an ICC
+profile or Night Light curve is put back unchanged. Its original is written to
+`%APPDATA%\klart\gamma.conf` before the scaled ramp, which is what makes recovery
+from a crash possible without a resident process.
+
+Two Windows-specific traps were found by running it. A gamma ramp outlives its
+process, unlike macOS, so the agent cannot rely on exit to undo it: the tray's
+reset and quit paths both release the software half, and the writer thread waits
+for its release acknowledgement rather than timing out while the state is being
+saved. And a display-change broadcast is *sent* to top-level windows, not posted
+to a queue, so the overlay manager needed a hidden host window with its own
+procedure to turn `WM_DISPLAYCHANGE` into a posted command; otherwise an overlay
+could remain over a rectangle that no longer belonged to any monitor. Re-enumerating
+also releases an old software half when a display has gone or its mechanism has
+changed, so switching HDR on or off cannot leave a scaled gamma ramp underneath
+a new overlay. The panel is topmost and the overlay is placed directly below it
+while open, so the slider is never dimmed out of reach.
+
+On the monitor this was written against (`LS32AG55x`, SDR, DDC/CI), a synthetic
+drag on the real panel reached 8%, wrote the identity baseline to `gamma.conf`,
+and the panel showed the seam tick at 25%. Reset released the ramp and left
+`levels.conf` at 25 instead of re-remembering 8. Quit released the ramp and
+exited; the next start restored 8% and wrote the baseline entry again. The
+overlay path was exercised against a real display, including hiding on a posted
+display change, but HDR itself was off, so the unticked box is the one that
+needs an HDR panel rather than another test.
+
+## 35. The bottom of the gamma ramp
+
+- [x] Reproduce the freeze below 10% on the SDR panel
+- [x] Measure the gamma API's actual floor instead of assuming it
+- [x] Stop the ramp at the lowest curve Windows accepts
+- [x] Carry the rest of the range with the existing click-through overlay
+- [x] Cover the whole 0-25% band in unit tests
+- [x] Run the ignored combined test through every level on the real panel
+- [x] Drag the release panel through 10%, 9%, 5%, 0%, and back
+- [x] Reset, quit, restart, and restore a below-floor level
+
+The report was that brightness stopped changing below 10%. The write was not
+being ignored by the monitor; `SetDeviceGammaRamp` was refusing the ramp. A
+probe against `LS32AG55x` showed the cliff exactly where Microsoft's heuristic
+says it is: every entry must stay within 32768 of identity. A linear scale
+reached 32440 at factor 0.495 and failed; 32768 at factor 0.5 applied. The old
+code called that failure an error, the tray kept the previous successful ramp,
+and the slider moved over a picture that no longer did.
+
+The fix is not to push the ramp harder. `gamma.rs` now works out the lowest
+factor its own baseline can take — an ICC profile or Night Light curve can move
+the floor — and clamps there. A new `software.rs` composes that ramp with the
+overlay already used for HDR. Above the floor the ramp does all the work and the
+overlay stays hidden; below it the ramp holds still and the overlay makes up the
+difference. The product of the two fractions is the old software-level meaning,
+so the ceiling and floor are unchanged. At 10% the ramp is at factor 0.52; at 9%
+it is at 0.51 with an 11/255 overlay; at 5% the overlay is 75/255; at 0% it is
+155/255. The panel is still above the overlay, and `persists` is false only while
+the overlay is contributing.
+
+Measured on the same panel through the release tray: 25% left gamma at identity
+and the overlay hidden; 10% wrote max 34078 with the overlay hidden; 9% wrote the
+floor at max 33422 and showed the overlay at alpha 11; 8%, 5%, 1%, and 0% held
+the ramp and raised alpha to 27, 75, 139, and 155. Going back to 25% restored
+identity and hid the overlay. Reset restored identity, removed the `gamma.conf`
+entry, and left `levels.conf` at 25. Quit at 9% restored identity, hid the overlay,
+and left `levels.conf` at 9; the next start put the floor and alpha 11 back.
+
+The ignored hardware test now walks 25, 20, 15, 12, 11, 10, 9, 8, 5, 1, and 0
+on whatever display pairs a backlight with a software fallback, and asserts each
+level reads back. A separate one-shot `klart set` still leaves only the ramp
+when it exits, as the warning says; the running tray is what holds the overlay
+part. HDR itself remains untested because the panel was in SDR.

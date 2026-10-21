@@ -37,7 +37,9 @@ pub use macos::{login_item, set_login_item};
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub(crate) use windows::{config_directory, diagnose, displays, open};
+pub(crate) use windows::{
+    clear_overlays, config_directory, diagnose, displays, open, set_overlay_anchor,
+};
 #[cfg(target_os = "windows")]
 pub use windows::{login_item, set_login_item};
 
