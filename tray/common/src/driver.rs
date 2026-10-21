@@ -386,13 +386,11 @@ impl Driver {
     }
 
     /// Which display holds the point, in the global top-left coordinates that
-    /// both [`CGEventGetLocation`] and [`crate::driver`]'s bounds are given in.
+    /// both `CGEventGetLocation` and [`crate::driver`]'s bounds are given in.
     ///
     /// Falls back to the main display, then to the first, so a key always lands
     /// somewhere even when the pointer is over a display klart cannot see or the
     /// bounds are unknown (as on a platform that does not report them).
-    ///
-    /// [`CGEventGetLocation`]: objc2_core_graphics::CGEvent::location
     pub fn display_at(&self, x: i32, y: i32) -> usize {
         let controls = self.controls.borrow();
 
@@ -490,6 +488,44 @@ impl Driver {
             // — the baseline has not moved, so they come out the same.
             self.pending_all.set(Some(percent));
         }
+    }
+
+    /// What [`request_all`](Self::request_all) would write, without writing it.
+    ///
+    /// For an agent that hands the writes to another thread: the decision about
+    /// relative against absolute is the driver's, but the bus is not the message
+    /// loop's to block. The pairs are in display order, and a display a relative
+    /// move cannot measure is left out — exactly as `request_all` would leave it.
+    #[must_use]
+    pub fn plan_all(&self, percent: u8) -> Vec<(usize, u8)> {
+        // The borrow has to end before `target_for` takes the baseline: a
+        // combined read here would make the second borrow a panic.
+        let how = self.remembered.borrow().combined();
+        let count = self.controls.borrow().len();
+
+        (0..count)
+            .filter_map(|display| {
+                self.target_for(display, percent, how)
+                    .map(|target| (display, target))
+            })
+            .collect()
+    }
+
+    /// Records a level another thread has been asked to write.
+    ///
+    /// The counterpart of [`plan_all`](Self::plan_all): an agent that writes on
+    /// a worker still has to remember what it asked for, or the next run and the
+    /// restore after a wake would put back the level before the drag.
+    pub fn note(&self, display: usize, percent: u8) {
+        let controls = self.controls.borrow();
+        let Some(control) = controls.get(display) else {
+            return;
+        };
+
+        self.remembered.borrow_mut().remember(
+            control.display().key(),
+            Brightness::from_percent(f32::from(percent)),
+        );
     }
 
     /// Puts a combined control's position onto every display.

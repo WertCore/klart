@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "cli", "tray"]
+members = ["core", "cli", "tray/common", "tray/macos", "tray/windows"]
 
 [workspace.package]
 version = "0.4.1"
@@ -12,6 +12,7 @@ authors = ["klart contributors"]
 
 [workspace.dependencies]
 klart-core = { path = "core" }
+klart-tray-common = { path = "tray/common" }
 
 [profile.release]
 # A menu bar agent is resident for the whole login session, so its own footprint

@@ -25,8 +25,8 @@ use std::rc::Rc;
 
 use objc2_core_graphics::CGEvent;
 
-use crate::driver::Driver;
 use crate::keys::STEP;
+use klart_tray_common::driver::Driver;
 
 /// A four-character code, as Carbon's event constants are written.
 const fn four_cc(code: &[u8; 4]) -> u32 {

@@ -160,12 +160,29 @@ name = "klart-tray"
 version = "0.4.1"
 dependencies = [
  "klart-core",
+ "klart-tray-common",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation",
  "objc2-quartz-core",
+]
+
+[[package]]
+name = "klart-tray-common"
+version = "0.4.1"
+dependencies = [
+ "klart-core",
+]
+
+[[package]]
+name = "klart-tray-windows"
+version = "0.4.1"
+dependencies = [
+ "klart-core",
+ "klart-tray-common",
+ "windows-sys",
 ]
 
 [[package]]

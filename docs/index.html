@@ -214,7 +214,7 @@ li { margin-bottom: 0.4rem; }
 <header>
   <div class="wrap">
     <h1 class="logo"><span class="sun"></span>klart</h1>
-    <p class="tagline">Brightness for every display attached to the machine — the built-in panel and external monitors alike, from the menu bar or the command line.</p>
+    <p class="tagline">Brightness for every display attached to the machine — the built-in panel and external monitors alike, from the menu bar or the notification area, or the command line.</p>
     <p class="lede">And when a monitor will not dim, it tells you why.</p>
     <div class="badges">
       <a class="badge" href="https://github.com/WertCore/klart/releases/latest"><strong>v0.4.1</strong></a>
@@ -244,7 +244,7 @@ li { margin-bottom: 0.4rem; }
     </div>
 
     <h3>Or the archives</h3>
-    <p>Every release carries a macOS app bundle, a Linux tarball and a Windows zip — <a href="https://github.com/WertCore/klart/releases/latest">on the releases page</a>. A bundle that arrived through a browser <em>is</em> quarantined, and klart is not signed or notarised, so:</p>
+    <p>Every release carries a macOS app bundle, a Linux tarball and a Windows zip — <a href="https://github.com/WertCore/klart/releases/latest">on the releases page</a>. The Windows zip holds both binaries: <code>klart.exe</code>, the command line, and <code>klart-tray.exe</code>, the agent that puts a sun in the notification area — beside the sound icon on Windows 11, in the taskbar's own ink — and opens a panel with a bar per display and one for all of them. A bundle that arrived through a browser <em>is</em> quarantined, and klart is not signed or notarised, so:</p>
 <pre><code>xattr -dr com.apple.quarantine /Applications/Klart.app</code></pre>
     <p>Or open it once and approve it in System&nbsp;Settings → Privacy &amp; Security, where macOS will be offering an <strong>Open Anyway</strong> button. Right-click and Open used to do this and no longer does — Apple removed that bypass for unsigned applications in macOS&nbsp;15.</p>
     <p>Neither step exists on the Homebrew path above, which is the argument for taking it.</p>
@@ -345,7 +345,7 @@ process. The difference is the link, not the interface.</code></pre>
       <tr><th>Platform</th><th>State</th></tr>
       <tr><td>macOS</td><td><span class="yes">Menu bar agent and command line, run on real hardware.</span> Apple silicon only.</td></tr>
       <tr><td>Linux</td><td><span class="no">Command line, compiled and tested by CI, never run.</span></td></tr>
-      <tr><td>Windows</td><td><span class="no">Command line, compiled and tested by CI, never run.</span></td></tr>
+      <tr><td>Windows</td><td><span class="yes">Command line and notification-area agent, compiled and tested by CI, and run on one Windows 11 machine.</span> Windows 10 is untested.</td></tr>
     </table>
 
     <p>That table is about platforms. Individual features can be newer than the hardware they have been tried on — as of 0.4.0 no HDR monitor has seen the HDR verdict, and no DDC write has been confirmed against a monitor that answers on this developer&rsquo;s own machine. <a href="https://github.com/WertCore/klart/blob/main/PLAN.md">PLAN.md</a> records this per feature, one entry per change, with its own unticked boxes.</p>

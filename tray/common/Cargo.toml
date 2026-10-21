@@ -1,0 +1,12 @@
+[package]
+name = "klart-tray-common"
+description = "The parts of klart's tray agents that do not belong to a platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+klart-core.workspace = true

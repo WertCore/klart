@@ -258,7 +258,7 @@ Input Monitoring) because a tap can *swallow* the event — return null and macO
 does not also dim the built-in panel — which passive HID observation cannot. That
 choice rests on one machine-dependent unknown, which is what the spike is for.
 
-### Spike, then the feature: `tray/src/keys.rs`
+### Spike, then the feature: `tray/macos/src/keys.rs`
 
 - [x] Confirm a session `CGEventTap` is refused without Accessibility
 - [x] Confirm a *granted* tap receives the brightness keys, and as what
@@ -272,7 +272,7 @@ release, which is the media-key case — "Use F1/F2 as standard function keys" o
 its default. So the `CGEventTap`/Accessibility route holds on this hardware and
 the HID fallback is not needed; swallowing comes with visibility.
 
-The feature is now `tray/src/keys.rs`. On a press it moves the display under the
+The feature is now `tray/macos/src/keys.rs`. On a press it moves the display under the
 pointer — [`Driver::display_at`] resolves it from `CGEventGetLocation` against the
 displays' bounds, both in the same global top-left coordinates — through the
 existing [`Driver`], so a key gets DDC-then-gamma and the sub-floor range for
@@ -294,7 +294,7 @@ Still to do, each its own step rather than this one:
 - [x] The `RegisterEventHotKey` chord fallback, for anyone who declines
       Accessibility — so the feature is reachable without the grant.
 
-Built in `tray/src/chord.rs`. `⌃⌥↑` / `⌃⌥↓` through Carbon's
+Built in `tray/macos/src/chord.rs`. `⌃⌥↑` / `⌃⌥↓` through Carbon's
 `RegisterEventHotKey`, which asks for no permission and works the moment it is
 installed — the price being that the chord is invented rather than the keys
 already on the keyboard. Registered whether or not the tap is (no harm in both,
@@ -308,7 +308,7 @@ because the API has no modern replacement that avoids the permission.
       swallows that with the key, so right now the only feedback is the screen
       changing. Enough to be usable, thin for a control people expect a HUD from.
 
-Built in `tray/src/hud.rs`, shaped to pass for the system OSD so it reads as
+Built in `tray/macos/src/hud.rs`, shaped to pass for the system OSD so it reads as
 inbuilt: a rounded *square* frosted `NSVisualEffectView` window, the system
 `sun.max.fill` SF Symbol filling the upper middle (the same glyph macOS uses),
 a continuous bar beneath it — a dim full-width track with a bright white fill,
@@ -1009,3 +1009,137 @@ about it would have been worse than either being wrong alone.
 Run against this machine's own displays, and the output parsed back. The case
 this hardware cannot produce — a single display, with no corroboration to
 report — is covered by a test instead.
+
+## 31. A notification-area agent for Windows
+
+- [x] `klart-tray-windows`, with `klart-tray.exe` as its binary
+- [x] Move the rate limiter, remembered levels and wake restore into
+      `klart-tray-common`, so both agents run the same code
+- [x] A sun drawn into an alpha bitmap at whatever size the notification area
+      asks for, rather than a fixed `.ico`
+- [x] A popup panel drawn by hand: one bar per display, a combined bar, and the
+      same commands the macOS menu carries
+- [x] CI builds, tests and documents the Windows agent; the release zip carries
+      both `klart.exe` and `klart-tray.exe`
+- [ ] The icon appears beside the sound icon, and opens the panel on a click
+- [ ] A drag on a per-display bar changes that display while it is dragged
+- [ ] The combined bar moves every display, in both absolute and relative modes
+- [ ] The wheel over a bar steps it, and the panel closes on Escape or a click
+      outside
+- [ ] "Start at login" survives a sign-out, and "Quit klart" removes the icon
+- [ ] Light and dark mode both draw legibly, including after the mode changes
+      while the agent is running
+- [ ] A monitor plugged in or removed is noticed, and the panel is placed on the
+      right monitor at 100%, 150% and 200%
+- [ ] Levels come back after a sleep, read back rather than assumed
+
+A Windows menu cannot hold a slider. `muda` has no item of that shape, and an
+owner-drawn `MENUITEMINFO` hands its drag messages to the menu's own modal loop,
+so the value would arrive after the drag rather than during it. The tray agent is
+therefore a popup window of its own, painted with GDI: a rounded track, a filled
+portion and a knob, which is the same shape the macOS menu draws with AppKit.
+A trackbar was the obvious alternative and was not taken: it brings its own idea
+of a theme, and on a hand-coloured surface in dark mode it reads as a control
+from another program.
+
+The icon is drawn rather than shipped as an `.ico`. macOS uses `sun.max`, which
+is a template image, and Windows has no template images for notification icons —
+so there is no single `.ico` that is legible on both a light and a dark taskbar.
+A monochrome sun with an alpha channel is, provided it is drawn in the taskbar's
+own ink: white on a dark taskbar, black on a light one. The agent reads
+`SystemUsesLightTheme` — not `AppsUseLightTheme`, which the panel follows — and
+replaces the icon when Windows mode changes. Drawing it from one description
+means it is sharp at 16, 20, 24 and 32 pixels rather than scaled from one size.
+
+Two things were not obvious and are worth recording. `Shell_NotifyIcon` does not
+forward wheel messages to the icon, so scrolling over the sun cannot work the way
+it does over the macOS status item; the wheel is handled by the open panel
+instead, over whichever bar the pointer is on. And version 4 of the notification
+protocol delivers one click as more than one message, so a double click would
+open the panel and immediately close it. There is a short window after a click in
+which a second one is the same gesture rather than a new one.
+
+The shared half moved rather than being copied. Rate limiting a DDC/CI link,
+remembering a level against a display key, and writing-read-back-and-retry after
+a wake are not a platform's business, and two copies would drift — macOS already
+had the better part of a year of fixes in them. `klart-tray-common` now holds
+`driver` and `request`; the macOS menu and the Windows panel each keep only what
+the other platform has no equivalent for.
+
+What was unticked was what needed a machine with a monitor and a person in front
+of it: the drawing, placement and drag handling. The agent started and stayed
+running, and the unit tests covered the geometry, the colour packing, the icon
+rasteriser and the shared driver's rules — but a test suite has no taskbar. The
+first person to open it found the icon in the overflow and the drag too slow;
+entry 32 is what that changed. The macOS half of the extraction was the CI's to
+prove, since it cannot be compiled on Windows, and CI has since compiled it.
+
+## 32. Beside the clock, and a drag that keeps up
+
+- [x] Promote the icon out of the overflow on Windows 11, once, and never
+      override an icon the person has hidden
+- [x] Brightness writes on a thread of their own, coalesced to the newest value
+      per display
+- [x] Repaint the row before the write is handed over
+- [x] A synthetic drag of 241 moves: every message returned in under 4 ms, and
+      the display reached the position asked for
+- [ ] The icon sits beside the sound icon on an ordinary login
+- [ ] A hand-driven drag feels as immediate as the measurement says
+- [ ] Opening the panel while a write is in flight does not read a busy link
+
+Windows puts every new notification icon in the overflow area, and its
+documentation says only the person may promote one. Windows 11 changed the
+storage rather than the rule: `HKCU\Control Panel\NotifyIconSettings` has a
+subkey per icon with an `IsPromoted` DWORD, and Explorer reacts to it at once.
+Writing 1 when the value is absent is therefore the first-run default; writing it
+over a 0 would be overruling someone who used Settings to hide klart, so a 0 is
+left alone. The key does not exist on Windows 10, where the per-icon choice lives
+in a binary stream; there the icon stays in the overflow until it is dragged out,
+because rewriting Explorer's stream is not a tray's business. `Shell_NotifyIcon`
+has no flag for any of this, and the registry route is undocumented — every
+failure in it is silent, since not being promoted is what the shell would have
+chosen anyway.
+
+The first report from a real panel was that the slider was very laggy. It was:
+`SetMonitorBrightness` took about two hundred milliseconds here, and the write
+was made inside `WM_MOUSEMOVE`, before the repaint. Every step of a drag stopped
+the message loop for a fifth of a second, so the knob moved at the monitor's rate
+and the pointer had no say. The writes now go to a worker thread that owns its
+own controls — a backend is deliberately not `Send`, so it enumerates them on the
+thread that will use them — and the panel paints with `UpdateWindow` before
+handing the value over. The worker drains its queue after each write and keeps
+only the newest value per display; the intermediate positions describe a pointer
+that has already moved on.
+
+Measured with 241 synthetic moves across a bar, one every 8 ms: the slowest
+message took 3.2 ms, the median 0.6 ms, and the display finished at 95%, which is
+where the pointer left it. What is still unticked is what a person sees: that the
+promoted icon is in the row beside the sound icon, and that a hand-driven drag
+feels like the numbers.
+
+## 33. The icon in the taskbar's ink, and tray code under one roof
+
+- [x] Draw the sun white on a dark taskbar and black on a light one
+- [x] Replace it when Windows mode changes, with the tick as a backstop
+- [x] Move `tray`, `tray-common` and `tray-windows` under `tray/macos`,
+      `tray/common` and `tray/windows`
+- [x] The sun matches the sound and network icons in both modes
+
+The first look at the icon found a gold sun next to white system icons. The
+colour had been chosen so that one bitmap would be legible on both taskbars,
+because Windows has no template images and will not recolour a notification icon
+itself. That is the wrong trade: an icon that is merely legible beside the sound
+and network icons still looks like a different program's. The glyph is now drawn
+in the ink those icons use — white on a dark taskbar, black on a light one — and
+redrawn when `SystemUsesLightTheme` changes. The taskbar setting is not
+`AppsUseLightTheme`, which the panel follows; Windows can run dark apps on a
+light taskbar, and the notification area follows the taskbar. A registry read in
+the tick catches the change if the broadcast arrives while the agent is asleep.
+Checked on this machine: white beside the white sound and network icons, black
+beside the black ones, and it changed while the agent was running.
+
+The crates moved without changing a package or binary name: `tray/macos` is
+still `klart-tray`, `tray/windows` is still `klart-tray-windows` with a
+`klart-tray.exe` binary, and `tray/common` is still `klart-tray-common`. The
+packaging script now names the two macOS binaries rather than building the
+workspace, which would have stopped in the Windows crate's `compile_error!`.

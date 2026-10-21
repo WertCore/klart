@@ -77,11 +77,20 @@ interface works and the difference is the link. Without that comparison,
 ## Ports
 
 macOS runs and is tested on real hardware. Linux and Windows are written,
-compiled and tested by CI on their own runners, and have never been run — the
+compiled and tested by CI on their own runners; the Windows agent has been run
+on one machine and its drag measured, and Linux has not been run at all — the
 boxes that need a machine are unticked in [`PLAN.md`](PLAN.md).
 
-The menu bar agent is macOS only. A tray elsewhere is StatusNotifierItem over
-D-Bus or `Shell_NotifyIcon`, which is a new crate rather than a `cfg`.
+There are two tray agents, and they are separate programs rather than one with
+`cfg` branches: `klart-tray` is AppKit, and `klart-tray-windows` is
+`Shell_NotifyIcon` with a hand-drawn panel instead of a menu, because a Windows
+menu cannot hold a slider that is dragged. What they do share is
+`klart-tray-common` — the write rate limiting, the remembered levels and the
+restore after a wake — so those cannot drift apart between the platforms. The
+three crates live under `tray/`: `common`, `macos` and `windows`, with the
+package and binary names unchanged. A tray for Linux is still StatusNotifierItem
+over D-Bus or the legacy XEmbed protocol, and is a third crate rather than a
+variant of either.
 
 `DisplayKey` is portable by contract — its derivation is seven numbered rules,
 each with a test, over EDID fields every operating system can read. A
@@ -166,6 +175,43 @@ accepted and dropped — the link returns before the panel behind it does. So th
 agent writes, reads back, and keeps trying for a few seconds until the display
 agrees. A display that never agrees is reported once and left alone.
 
+## In the notification area
+
+`klart-tray.exe` is the Windows agent. It puts a sun in the notification area —
+beside the sound icon on Windows 11 — in the same white or black as the system's
+own icons, and redraws it when Windows mode changes. Left or right clicking it
+opens a panel: a bar per display, one for all of them when there is more than
+one, then the rows for keeping their relative levels, starting at login, looking
+for displays again, and quitting. A wheel over a bar moves it five percent — the
+wheel is handled by the panel rather than by the icon, because Windows does not
+forward wheel messages to notification icons.
+
+Windows puts a new notification icon in the overflow area by design, and no
+documented API overrides that. On Windows 11 22H2 and later the choice is stored
+per icon, so klart asks to be shown beside the clock on its first run — and only
+then: if the icon has been hidden in Settings, that choice is left alone.
+Windows 10 keeps the icon in the overflow until it is dragged out, which is what
+that system asks of every application.
+
+The panel is drawn rather than assembled from controls. A trackbar is a Windows
+control with its own idea of a theme, and on a hand-coloured popup it reads as a
+trackbar rather than as the bar the menu bar agent draws; drawing it also means
+a drag is one mouse move and a new fill width. Windows 11 rounds its corners
+through DWM, and Windows 10 draws it square, the way its own flyouts are.
+
+A drag repaints before it asks for anything, and the write is made by a
+background thread. A DDC/CI write takes about two hundred milliseconds on the
+monitor this was written against: fine for a display, not fine for a pointer.
+The thread keeps only the newest value for each display, so a fast drag skips
+the positions already left behind instead of replaying them.
+
+It is an agent in the same sense as the macOS one: no window, no taskbar button,
+and it stays running to hold the software half of a display that has no hardware
+brightness control, and to put remembered levels back. A Windows gamma ramp is
+not reverted when the process exits, so the agent releases it on the way out
+rather than leaving the display scaled. The sleep restore above is the same code,
+from `klart-tray-common`.
+
 ## Status
 
 Early. [`PLAN.md`](PLAN.md) tracks what is built and what is not, one entry per
@@ -230,21 +276,32 @@ which display and why the others did not.
 
 #### Windows
 
+Unzip both files somewhere permanent.
+
 ```
-klart.exe list
+klart.exe list      # the command line
+klart-tray.exe      # the agent; "Start at login" keeps it there
 ```
 
-Unsigned, so SmartScreen warns on first run.
+The agent sits in the notification area and opens the panel described above.
+Both binaries are unsigned, so SmartScreen warns on first run.
 
 ## Building
 
 ```sh
-cargo build --release      # the two binaries
-scripts/bundle.sh          # dist/Klart.app
+# macOS
+cargo build --release -p klart-cli -p klart-tray
+scripts/bundle.sh
+
+# Windows
+cargo build --release -p klart-cli -p klart-tray-windows
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` will fetch the
-right one on first build.
+right one on first build. Name the agent for the platform: `klart-tray` is
+AppKit and `klart-tray-windows` is Win32. A bare `cargo build --release` tries
+every workspace member and stops in the agent for the other platform, which says
+so with a `compile_error!`.
 
 ## Licence
 

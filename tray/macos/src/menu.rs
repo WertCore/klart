@@ -22,9 +22,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
-use crate::driver::Driver;
-
-use crate::request::{self, Request};
+use klart_tray_common::driver::Driver;
+use klart_tray_common::request::{self, Request};
 
 /// Wide enough for a slider that can be aimed, narrow enough not to make the
 /// menu look like a window.
