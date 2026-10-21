@@ -86,6 +86,13 @@ const TRACK_HEIGHT: i32 = 26;
 const NOTE_HEIGHT: i32 = 18;
 const ROW_GAP: i32 = 4;
 const SEPARATOR_HEIGHT: i32 = 13;
+/// Space between the separator and the first command.
+///
+/// The separator's line sits in the middle of `SEPARATOR_HEIGHT`, and the panel
+/// ends with `PAD`. Adding the rest of that padding here makes the gap above the
+/// first row match the gap below the last one; without it the command block
+/// looks pinned to the separator.
+const COMMAND_TOP_GAP: i32 = PAD - SEPARATOR_HEIGHT / 2;
 const COMMAND_HEIGHT: i32 = 30;
 const KNOB: i32 = 7;
 const BAR: i32 = 4;
@@ -396,7 +403,7 @@ impl Panel {
         if !self.commands.is_empty() {
             let separator = dpi(SEPARATOR_HEIGHT, self.dpi);
             self.separator = Some(y + separator / 2);
-            y += separator;
+            y += separator + dpi(COMMAND_TOP_GAP, self.dpi);
 
             let inset = pad / 2;
             for command in &mut self.commands {
